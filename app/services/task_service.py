@@ -16,7 +16,7 @@ async def create_task(
     """Створити нове завдання"""
     if not title or not title.strip():
         return {"status": "error", "message": "Назва завдання не може бути порожньою"}
-    
+
     task_id = await task_repository.create_task(
         user_id=user_id,
         title=title.strip(),
@@ -25,7 +25,7 @@ async def create_task(
         due_at=due_at,
         due_date=due_date
     )
-    
+
     logger.info(f"Завдання створено: task_id={task_id}")
     return {"status": "success", "task_id": task_id, "message": "Завдання успішно створено"}
 
@@ -34,49 +34,27 @@ async def get_task(task_id: int, user_id: int) -> Optional[dict]:
     return await task_repository.get_task(task_id, user_id)
 
 async def get_tasks_today(user_id: int) -> List[dict]:
-    """Отримати завдання на сьогодні"""
-    today = date.today().isoformat()
-    now = datetime.utcnow().isoformat()
-    
-    tasks = await task_repository.get_tasks_by_filter(
-        user_id=user_id,
-        status="in_progress",
-        due_date_from=today,
-        due_date_to=today,
-        due_at_from=now,
-        due_at_to=f"{today}T23:59:59"
-    )
-    
-    no_due_tasks = await task_repository.get_tasks_by_filter(
-        user_id=user_id,
-        status="in_progress",
-        has_due_date=False
-    )
-    
-    return tasks + no_due_tasks
+    """Отримати завдання на сьогодні (з датою + без строку)"""
+    today = date.today()
+
+    # Завдання на сьогодні (з due_date або due_at)
+    tasks_with_date = await task_repository.get_tasks_for_date(user_id, today)
+
+    # Завдання без строку
+    tasks_no_date = await task_repository.get_tasks_without_due_date(user_id)
+
+    return tasks_with_date + tasks_no_date
 
 async def get_tasks_tomorrow(user_id: int) -> List[dict]:
     """Отримати завдання на завтра"""
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
-    
-    return await task_repository.get_tasks_by_filter(
-        user_id=user_id,
-        status="in_progress",
-        due_date_from=tomorrow,
-        due_date_to=tomorrow
-    )
+    tomorrow = date.today() + timedelta(days=1)
+    return await task_repository.get_tasks_for_date(user_id, tomorrow)
 
 async def get_tasks_week(user_id: int) -> List[dict]:
     """Отримати завдання на наступні 7 днів"""
-    today = date.today().isoformat()
-    week_later = (date.today() + timedelta(days=7)).isoformat()
-    
-    return await task_repository.get_tasks_by_filter(
-        user_id=user_id,
-        status="in_progress",
-        due_date_from=today,
-        due_date_to=week_later
-    )
+    today = date.today()
+    week_later = today + timedelta(days=7)
+    return await task_repository.get_tasks_for_date_range(user_id, today, week_later)
 
 async def get_overdue_tasks(user_id: int) -> List[dict]:
     """Отримати прострочені завдання"""
@@ -114,16 +92,16 @@ async def complete_task(task_id: int, user_id: int) -> dict:
     task = await task_repository.get_task(task_id, user_id)
     if not task:
         return {"status": "error", "message": "Завдання не знайдено"}
-    
+
     if task['status'] == 'completed':
         return {"status": "error", "message": "Завдання вже виконане"}
-    
+
     success = await task_repository.update_task(
         task_id, user_id,
         status="completed",
         completed_at=datetime.utcnow().isoformat()
     )
-    
+
     if success:
         return {"status": "success", "message": "Завдання позначено як виконане"}
     return {"status": "error", "message": "Помилка оновлення завдання"}
@@ -133,15 +111,15 @@ async def cancel_task(task_id: int, user_id: int) -> dict:
     task = await task_repository.get_task(task_id, user_id)
     if not task:
         return {"status": "error", "message": "Завдання не знайдено"}
-    
+
     if task['status'] == 'cancelled':
         return {"status": "error", "message": "Завдання вже скасоване"}
-    
+
     success = await task_repository.update_task(
         task_id, user_id,
         status="cancelled"
     )
-    
+
     if success:
         return {"status": "success", "message": "Завдання скасовано"}
     return {"status": "error", "message": "Помилка оновлення завдання"}
@@ -151,16 +129,16 @@ async def restore_task(task_id: int, user_id: int) -> dict:
     task = await task_repository.get_task(task_id, user_id)
     if not task:
         return {"status": "error", "message": "Завдання не знайдено"}
-    
+
     if task['status'] == 'in_progress':
         return {"status": "error", "message": "Завдання вже активне"}
-    
+
     success = await task_repository.update_task(
         task_id, user_id,
         status="in_progress",
         completed_at=None
     )
-    
+
     if success:
         return {"status": "success", "message": "Завдання відновлено"}
     return {"status": "error", "message": "Помилка оновлення завдання"}
@@ -168,7 +146,7 @@ async def restore_task(task_id: int, user_id: int) -> dict:
 async def delete_task(task_id: int, user_id: int) -> dict:
     """Видалити завдання остаточно"""
     success = await task_repository.delete_task(task_id, user_id)
-    
+
     if success:
         return {"status": "success", "message": "Завдання видалено"}
     return {"status": "error", "message": "Завдання не знайдено або вже видалено"}
