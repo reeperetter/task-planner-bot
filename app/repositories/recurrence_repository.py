@@ -14,6 +14,8 @@ async def create_rule(
     days_of_week: Optional[str] = None,
     day_of_month: Optional[int] = None,
     execution_time: Optional[str] = None,
+    interval_months: Optional[int] = None,
+    interval_years: Optional[int] = None,
 ) -> int:
     """Створити нове правило повторення та повернути його ID."""
     async with get_connection() as conn:
@@ -21,8 +23,8 @@ async def create_rule(
             """
             INSERT INTO recurrence_rules
             (rule_type, interval_days, days_of_week, day_of_month,
-             execution_time, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+             execution_time, interval_months, interval_years, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 rule_type,
@@ -30,6 +32,8 @@ async def create_rule(
                 days_of_week,
                 day_of_month,
                 execution_time,
+                interval_months,
+                interval_years,
                 datetime.utcnow().isoformat(),
             ),
         )
@@ -68,23 +72,8 @@ async def get_rules_for_user(user_id: int) -> List[dict]:
 
 
 async def delete_rule(rule_id: int) -> bool:
-    """Видалити правило повторення (тільки якщо немає пов'язаних активних завдань)."""
+    """Видалити правило повторення."""
     async with get_connection() as conn:
-        # Перевіряємо, чи є активні завдання з цим правилом
-        cursor = await conn.execute(
-            """
-            SELECT COUNT(*) as cnt FROM tasks
-            WHERE recurrence_rule_id = ? AND status = 'in_progress'
-            """,
-            (rule_id,),
-        )
-        row = await cursor.fetchone()
-        if row and row["cnt"] > 0:
-            logger.warning(
-                f"Не можна видалити правило {rule_id}: є активні завдання"
-            )
-            return False
-
         cursor = await conn.execute(
             "DELETE FROM recurrence_rules WHERE id = ?",
             (rule_id,),

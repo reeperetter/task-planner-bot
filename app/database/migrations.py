@@ -14,7 +14,6 @@ async def run_migrations() -> None:
     
     async with get_connection() as conn:
         try:
-            # Читаємо та виконуємо SQL-схему
             schema_sql = schema_path.read_text(encoding="utf-8")
             await conn.executescript(schema_sql)
             await conn.commit()

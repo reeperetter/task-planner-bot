@@ -43,17 +43,21 @@ CREATE TABLE IF NOT EXISTS tasks (
     CHECK (due_at IS NULL OR due_date IS NULL)
 );
 
--- Таблиця правил повторення
+-- Таблиця правил повторення (з підтримкою інтервалів у днях, місяцях, роках)
 CREATE TABLE IF NOT EXISTS recurrence_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rule_type TEXT NOT NULL,
     interval_days INTEGER,
+    interval_months INTEGER,
+    interval_years INTEGER,
     days_of_week TEXT,
     day_of_month INTEGER,
     execution_time TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    CHECK (rule_type IN ('daily', 'every_n_days', 'weekly', 'specific_days', 'monthly')),
+    CHECK (rule_type IN ('daily', 'every_n_days', 'weekly', 'specific_days', 'monthly', 'every_n_months', 'yearly')),
     CHECK (interval_days IS NULL OR interval_days > 0),
+    CHECK (interval_months IS NULL OR interval_months > 0),
+    CHECK (interval_years IS NULL OR interval_years > 0),
     CHECK (day_of_month IS NULL OR (day_of_month >= 1 AND day_of_month <= 31))
 );
 
@@ -78,4 +82,5 @@ CREATE INDEX IF NOT EXISTS idx_tasks_due_at ON tasks(due_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
 CREATE INDEX IF NOT EXISTS idx_tasks_category ON tasks(category);
 CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
+CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_rule_id ON tasks(recurrence_rule_id);
 CREATE INDEX IF NOT EXISTS idx_report_log_user_date ON report_log(user_id, report_date);

@@ -12,7 +12,7 @@ async def create_task(
     priority: str = "normal",
     due_at: Optional[str] = None,
     due_date: Optional[str] = None,
-    recurrence_rule_id: Optional[int] = None
+    recurrence_rule_id: Optional[int] = None,
 ) -> int:
     """Створити нове завдання та повернути його ID"""
     async with get_connection() as conn:
@@ -93,9 +93,7 @@ async def get_tasks_for_date_range(user_id: int, date_from: date, date_to: date)
         return [dict(row) for row in rows]
 
 async def get_planned_tasks(user_id: int) -> List[dict]:
-    """
-    Отримати ЗАПЛАНОВАНІ завдання — сьогодні + майбутнє.
-    """
+    """Отримати ЗАПЛАНОВАНІ завдання — сьогодні + майбутнє."""
     today = date.today()
     today_str = today.isoformat()
     day_start = f"{today_str}T00:00:00"
@@ -119,9 +117,7 @@ async def get_planned_tasks(user_id: int) -> List[dict]:
         return [dict(row) for row in rows]
 
 async def get_done_tasks(user_id: int) -> List[dict]:
-    """
-    Отримати ВИКОНАНІ завдання — ті, строк яких минув.
-    """
+    """Отримати ВИКОНАНІ завдання — ті, строк яких минув."""
     today = date.today()
     today_str = today.isoformat()
     day_start = f"{today_str}T00:00:00"
@@ -143,6 +139,40 @@ async def get_done_tasks(user_id: int) -> List[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+async def get_recurring_tasks(user_id: int) -> List[dict]:
+    """
+    Отримати всі активні повторювані завдання користувача.
+    Тобто ті, що мають recurrence_rule_id IS NOT NULL і status = 'in_progress'.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """
+            SELECT * FROM tasks 
+            WHERE user_id = ? 
+              AND status = 'in_progress'
+              AND recurrence_rule_id IS NOT NULL
+            ORDER BY 
+              COALESCE(due_at, due_date || 'T00:00:00') ASC,
+              CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+            """,
+            (user_id,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+async def count_active_tasks_by_rule(rule_id: int) -> int:
+    """Порахувати кількість активних завдань із цим правилом повторення."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """
+            SELECT COUNT(*) as cnt FROM tasks
+            WHERE recurrence_rule_id = ? AND status = 'in_progress'
+            """,
+            (rule_id,)
+        )
+        row = await cursor.fetchone()
+        return row["cnt"] if row else 0
 
 async def get_tasks_by_filter(
     user_id: int,
