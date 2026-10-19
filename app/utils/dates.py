@@ -1,8 +1,8 @@
 from datetime import datetime, date
-from typing import Optional
+from aiogram import types
 
-def format_task_for_display(task: dict) -> str:
-    """Форматувати завдання для відображення"""
+def format_task_line(task: dict) -> str:
+    """Форматувати одне завдання як рядок тексту"""
     status_emoji = {
         'in_progress': '⏳',
         'completed': '✅',
@@ -41,18 +41,28 @@ def format_task_for_display(task: dict) -> str:
     else:
         due_info = "📅 без строку"
     
-    return (
-        f"{status} {priority} {category} <b>{task['title']}</b>\n"
-        f"   {due_info} | ID: {task['id']}"
-    )
+    return f"{status} {priority} {category} <b>{task['title']}</b>\n   {due_info}"
 
-def format_tasks_list(tasks: list, title: str) -> str:
-    """Форматувати список завдань"""
+def format_tasks_list(tasks: list, title: str) -> tuple[str, types.InlineKeyboardMarkup | None]:
+    """
+    Форматувати список завдань з inline-кнопками видалення під кожним завданням.
+    Повертає (текст, клавіатура).
+    """
     if not tasks:
-        return f"{title}\n\n📭 Завдань не знайдено"
+        return f"<b>{title}</b>\n\n📭 Завдань не знайдено", None
     
     result = f"<b>{title}</b> ({len(tasks)})\n\n"
-    for task in tasks:
-        result += format_task_for_display(task) + "\n\n"
+    buttons = []
     
-    return result.strip()
+    for task in tasks:
+        result += format_task_line(task) + "\n\n"
+        # Кнопка видалення для кожного завдання
+        buttons.append([
+            types.InlineKeyboardButton(
+                text=f"🗑️ Видалити: {task['title'][:20]}",
+                callback_data=f"delete_{task['id']}"
+            )
+        ])
+    
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+    return result.strip(), keyboard
