@@ -893,9 +893,15 @@ async def filter_reset(callback: types.CallbackQuery, state: FSMContext) -> None
     await _apply_filter(callback, state, category=None, priority=None)
 
 async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, category: Optional[str] = None, priority: Optional[str] = None) -> None:
+    logger.info(f"🔧 Виклик _apply_filter: category={category}, priority={priority}")
+    
     data = await state.get_data()
+    logger.info(f"🔧 Дані стану: {data}")
+    
     list_func_name = data.get("current_list_func")
     title = data.get("current_list_title", "Завдання")
+    
+    logger.info(f"🔧 list_func_name={list_func_name}, title={title}")
     
     # Мапінг імен функцій
     func_map = {
@@ -909,6 +915,7 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
     
     fetch_func = func_map.get(list_func_name)
     if not fetch_func:
+        logger.error(f"🔧 Функція не знайдена в func_map: {list_func_name}")
         await callback.answer("Помилка: не вдалося визначити тип списку.", show_alert=True)
         return
     
@@ -918,9 +925,11 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
         return
     
     try:
+        logger.info(f"🔧 Виклик {list_func_name}_filtered з user_id={user_id}, category={category}, priority={priority}")
         tasks = await fetch_func(user_id, category, priority)
-    except Exception:
-        logger.exception("Помилка отримання завдань з фільтрами")
+        logger.info(f"🔧 Отримано {len(tasks)} завдань")
+    except Exception as e:
+        logger.exception(f"🔧 Помилка отримання завдань з фільтрами: {e}")
         await callback.answer("⚠️ Не вдалося отримати завдання.", show_alert=True)
         return
     
@@ -928,8 +937,14 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
     await state.update_data(current_category=category, current_priority=priority)
     
     # Видаляємо старе повідомлення і відправляємо нове
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+        logger.info("🔧 Старе повідомлення видалено")
+    except Exception as e:
+        logger.warning(f"🔧 Не вдалося видалити повідомлення: {e}")
+    
     await _send_tasks_list(callback.message, title, tasks, category, priority)
+    logger.info("🔧 Нове повідомлення відправлено")
     await callback.answer()
 
 # =============================================================================
