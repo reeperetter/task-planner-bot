@@ -57,6 +57,7 @@ WEEKDAY_NAMES = {
 
 MENU_TEXTS = {
     "➕ Додати завдання",
+    "🔍 Пошук",
     "📅 На сьогодні",
     "📆 На завтра",
     "📊 Наступні 7 днів",
@@ -72,12 +73,12 @@ MAX_MESSAGE_LENGTH = 3500
 HELP_TEXT = (
     "❓ <b>Допомога користувачу</b>\n\n"
     "Я — ваш особистий планувальник. Допоможу не забувати про важливі справи.\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>➕ ЯК СТВОРИТИ ЗАВДАННЯ</b>\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "Є два способи:\n\n"
-    "<b>1. Просто напишіть текст</b> — я сам розпізнаю дату, час, повторення:\n"
-    "• <code>купити молоко</code> — попрошу вказати дату\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "<b>Спосіб 1: Природна мова (найшвидший)</b>\n"
+    "Просто напишіть текст. Я сам розпізнаю деталі:\n"
+    "• <code>купити молоко</code> (я попрошу вказати дату)\n"
     "• <code>20.10.2026 зателефонувати постачальнику</code>\n"
     "• <code>завтра підготувати звіт</code>\n"
     "• <code>післязавтра о 18:30 зустріч</code>\n"
@@ -86,72 +87,66 @@ HELP_TEXT = (
     "• <code>кожні 3 дні передавати показники</code>\n"
     "• <code>кожні 2 тижні зустрічатися з командою</code>\n"
     "• <code>кожні 2 місяці платити за оренду</code>\n"
-    "• <code>кожні 2 роки проходити медогляд</code>\n"
     "• <code>щомісяця 25 числа оплачувати рахунки</code>\n\n"
-    "Після введення я покажу попередній перегляд — "
-    "можете змінити категорію, пріоритет або дату кнопками.\n\n"
-    "<b>2. Покрокове створення</b> — натисніть «➕ Додати завдання», "
-    "і я запитаю назву, категорію, пріоритет і дату по черзі.\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Після введення я покажу попередній перегляд, де ви зможете змінити категорію, пріоритет або дату кнопками.\n\n"
+    "<b>Спосіб 2: Покрокове створення</b>\n"
+    "Натисніть «➕ Додати завдання», і я запитаю назву, категорію, пріоритет і дату по черзі.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>🔄 ПОВТОРЮВАНІ ЗАВДАННЯ</b>\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     "Використовуйте слова-маркери:\n"
     "• <code>щодня</code> / <code>щоденно</code> — кожного дня\n"
     "• <code>щотижня</code> — раз на тиждень (того ж дня)\n"
     "• <code>щопонеділка</code>, <code>щовівторка</code>... — у конкретний день\n"
     "• <code>щопонеділка і щоп'ятниця</code> — у кілька днів\n"
-    "• <code>кожні N днів</code> — з інтервалом у днях\n"
-    "• <code>кожні N тижнів</code> — з інтервалом у тижнях\n"
-    "• <code>кожні N місяців</code> — з інтервалом у місяцях\n"
-    "• <code>кожні N років</code> — з інтервалом у роках\n"
+    "• <code>кожні N днів/тижнів/місяців/років</code> — з інтервалом\n"
     "• <code>щомісяця N числа</code> — конкретне число місяця\n\n"
-    "Повторювані завдання позначаються значком 🔁 у списках.\n"
-    "Щоб зупинити повторення — просто видаліть завдання зі списку «🔄 Повторювані».\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Повторювані завдання позначаються значком 🔁 у кінці рядка з датою. Щоб зупинити повторення, просто видаліть завдання.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>📋 СПИСКИ ЗАВДАНЬ</b>\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "• <b>📅 На сьогодні</b> — завдання на поточну дату + завдання без строку\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "• <b>📅 На сьогодні</b> — завдання на поточну дату + без строку\n"
     "• <b>📆 На завтра</b> — завдання на завтра\n"
     "• <b>📊 Наступні 7 днів</b> — завдання на найближчий тиждень\n"
     "• <b>📋 Заплановані</b> — усі завдання з датою сьогодні або в майбутньому\n"
     "• <b>✅ Виконані</b> — завдання, строк яких уже минув\n"
     "• <b>🔄 Повторювані</b> — усі активні повторювані завдання\n\n"
-    "Завдання сортуються спочатку за датою, потім за пріоритетом.\n"
-    "Поруч із кожним завданням є кнопка 🗑️ для видалення.\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "Завдання сортуються спочатку за датою, потім за пріоритетом.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "<b>✏️ РЕДАГУВАННЯ ТА ВИДАЛЕННЯ</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "У будь-якому списку поруч із кожним завданням є кнопки:\n"
+    "• ✏️ <b>Редагувати</b> — змінити назву, дату або пріоритет\n"
+    "• 🗑️ <b>Видалити</b> — повністю видалити завдання\n\n"
+    "Якщо це був останній екземпляр повторюваного завдання — правило автоматично видалиться.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "<b>🔍 ПОШУК</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Натисніть «🔍 Пошук» або напишіть /search, потім введіть слово або фразу.\n"
+    "Я знайду всі активні завдання, у назві яких є цей текст.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>⭐ ПРИОРІТЕТИ</b>\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     "• 🔵 <b>Низький</b> — можна відкласти\n"
     "• 🟡 <b>Звичайний</b> — стандартний (за замовчуванням)\n"
     "• 🔴 <b>Високий</b> — терміново / важливо\n\n"
-    "Пріоритет можна змінити кнопкою «⭐ Пріоритет» у попередньому перегляді.\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-    "<b>🗑️ ВИДАЛЕННЯ</b>\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "У будь-якому списку натисніть «🗑️» біля завдання і підтвердьте.\n"
-    "Якщо це був останній екземпляр повторюваного завдання — "
-    "правило автоматично видалиться.\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>⌨️ КОМАНДИ</b>\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     "• /start — головне меню\n"
     "• /add — створити завдання покроково\n"
-    "• /today — завдання на сьогодні\n"
-    "• /tomorrow — завдання на завтра\n"
-    "• /week — завдання на 7 днів\n"
-    "• /planned — заплановані\n"
-    "• /done — виконані (строк минув)\n"
-    "• /recurring — повторювані\n"
-    "• /help — ця допомога\n"
+    "• /search — пошук завдань за текстом\n"
+    "• /today, /tomorrow, /week — швидкі списки\n"
+    "• /planned, /done, /recurring — інші списки\n"
+    "• /help — ця довідка\n"
     "• /cancel — скасувати поточну дію\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>💡 ПОРАДИ</b>\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "• Щоранку о 07:00 я надсилатиму вам зведення завдань на день.\n"
-    "• Завдання автоматично переходять у «✅ Виконані», коли строк минув.\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     "• Якщо ви випадково ввели минулу дату для повторюваного завдання — "
     "я автоматично перенесу його на найближчу майбутню дату.\n"
-    "• Натисніть «❌ Скасувати» у будь-який момент, щоб перервати створення.\n\n"
+    "• Натисніть «❌ Скасувати» у будь-який момент, щоб перервати створення.\n"
+    "• Дані зберігаються у хмарній базі даних і не зникають при оновленнях.\n\n"
     "Готові? Просто напишіть своє перше завдання 👇"
 )
 
@@ -275,12 +270,11 @@ async def _send_tasks_list(
 
         buttons = []
         for task in chunk:
-            label = (task.get("title") or "Завдання").replace("\n", " ")[:24]
+            label = (task.get("title") or "Завдання").replace("\n", " ")[:20]
+            task_id = task['id']
             buttons.append([
-                types.InlineKeyboardButton(
-                    text=f"🗑️ {label}",
-                    callback_data=f"delete_{task['id']}",
-                )
+                types.InlineKeyboardButton(text=f"✏️ {label}", callback_data=f"edit_menu_{task_id}"),
+                types.InlineKeyboardButton(text=f"🗑️ {label}", callback_data=f"delete_{task_id}"),
             ])
 
         await message.answer(
@@ -934,6 +928,152 @@ async def ask_delete(callback: types.CallbackQuery) -> None:
 async def unknown_callback(callback: types.CallbackQuery) -> None:
     logger.debug("Невідомий callback: %s", callback.data)
     await callback.answer()
+
+
+# =============================================================================
+# ПОШУК ТА РЕДАГУВАННЯ
+# =============================================================================
+
+class SearchState(StatesGroup):
+    waiting_for_query = State()
+
+class EditState(StatesGroup):
+    waiting_for_new_title = State()
+    waiting_for_new_date = State()
+
+# --- ПОШУК ---
+
+@router.message(Command("search"))
+@router.message(F.text == "🔍 Пошук")
+async def cmd_search(message: types.Message, state: FSMContext):
+    await state.set_state(SearchState.waiting_for_query)
+    await message.answer(
+        "🔎 <b>Пошук завдань</b>\n\n"
+        "Введіть слово або фразу для пошуку в назві завдань:",
+        parse_mode="HTML"
+    )
+
+@router.message(SearchState.waiting_for_query)
+async def process_search(message: types.Message, state: FSMContext):
+    query = message.text.strip()
+    if len(query) < 2:
+        await message.answer("Запит занадто короткий. Введіть щонайменше 2 символи.")
+        return
+        
+    user_id = await user_repository.get_user_id_by_telegram_id(message.from_user.id)
+    tasks = await task_service.search_tasks(user_id, query)
+    await state.clear()
+    
+    if not tasks:
+        await message.answer(f"📭 За запитом «<b>{_escape(query)}</b>» нічого не знайдено.", parse_mode="HTML")
+        return
+        
+    await _send_tasks_list(message, f"🔎 Результати пошуку: «{query}»", tasks)
+
+
+# --- РЕДАГУВАННЯ ---
+
+@router.callback_query(F.data.startswith("edit_menu_"))
+async def open_edit_menu(callback: types.CallbackQuery):
+    task_id = int(callback.data.split("_")[-1])
+    user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
+    task = await task_service.get_task(task_id, user_id)
+    
+    if not task:
+        await callback.answer("Завдання не знайдено.", show_alert=True)
+        return
+
+    title = _escape(task.get("title"))
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📝 Змінити назву", callback_data=f"edit_title_{task_id}")],
+        [types.InlineKeyboardButton(text="📅 Змінити дату", callback_data=f"edit_date_{task_id}")],
+        [types.InlineKeyboardButton(text="⭐ Змінити пріоритет", callback_data=f"edit_priority_{task_id}")],
+        [types.InlineKeyboardButton(text="↩️ Назад", callback_data="back_to_list")],
+    ])
+    
+    await callback.message.edit_text(
+        f"✏️ <b>Редагування завдання:</b>\n\n📝 {title}\n\nОберіть, що змінити:",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "back_to_list")
+async def back_to_list(callback: types.CallbackQuery):
+    await callback.message.delete()
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("edit_title_"))
+async def start_edit_title(callback: types.CallbackQuery, state: FSMContext):
+    task_id = int(callback.data.split("_")[-1])
+    await state.update_data(edit_task_id=task_id)
+    await callback.message.edit_text("Введіть <b>нову назву</b> завдання:", parse_mode="HTML")
+    await callback.answer()
+    await state.set_state(EditState.waiting_for_new_title)
+
+@router.message(EditState.waiting_for_new_title)
+async def process_new_title(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    task_id = data.get("edit_task_id")
+    user_id = await user_repository.get_user_id_by_telegram_id(message.from_user.id)
+    
+    new_title = message.text.strip()
+    await task_repository.update_task(task_id, user_id, title=new_title)
+    
+    await state.clear()
+    await message.answer(f"✅ Назву змінено на: <b>{_escape(new_title)}</b>", parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("edit_date_"))
+async def start_edit_date(callback: types.CallbackQuery, state: FSMContext):
+    task_id = int(callback.data.split("_")[-1])
+    await state.update_data(edit_task_id=task_id)
+    await callback.message.edit_text(
+        "Введіть <b>нову дату</b> у форматі ДД.ММ.РРРР\n(наприклад, 25.10.2026):", 
+        parse_mode="HTML"
+    )
+    await callback.answer()
+    await state.set_state(EditState.waiting_for_new_date)
+
+@router.message(EditState.waiting_for_new_date)
+async def process_new_date(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    task_id = data.get("edit_task_id")
+    user_id = await user_repository.get_user_id_by_telegram_id(message.from_user.id)
+    
+    new_date = _parse_user_date(message.text.strip())
+    if not new_date:
+        await message.answer("❌ Невірний формат. Спробуйте ще раз (ДД.ММ.РРРР):")
+        return
+        
+    await task_repository.update_task(task_id, user_id, due_date=new_date, due_at=None)
+    await state.clear()
+    await message.answer(f"✅ Дату змінено на: <b>{new_date}</b>", parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("edit_priority_"))
+async def edit_priority_inline(callback: types.CallbackQuery, state: FSMContext):
+    task_id = int(callback.data.split("_")[-1])
+    await state.update_data(edit_task_id=task_id)
+    
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔵 Низький", callback_data="set_priority_low")],
+        [types.InlineKeyboardButton(text="🟡 Звичайний", callback_data="set_priority_normal")],
+        [types.InlineKeyboardButton(text="🔴 Високий", callback_data="set_priority_high")],
+    ])
+    await callback.message.edit_text("⭐ Оберіть новий пріоритет:", reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("set_priority_"))
+async def process_new_priority(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    task_id = data.get("edit_task_id")
+    user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
+    
+    new_priority = callback.data.split("_")[-1]
+    await task_repository.update_task(task_id, user_id, priority=new_priority)
+    
+    await state.clear()
+    await callback.message.edit_text("✅ Пріоритет успішно змінено.", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[]))
+    await callback.answer("Пріоритет оновлено!")
 
 
 # =============================================================================

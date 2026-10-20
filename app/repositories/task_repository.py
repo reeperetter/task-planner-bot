@@ -221,6 +221,54 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
         return "UPDATE 1" in status
 
 
+async def search_tasks(user_id: int, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Пошук завдань за текстом у назві (case-insensitive для PostgreSQL)."""
+    search_pattern = f"%{query}%"
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM tasks 
+            WHERE user_id = $1 AND status = 'in_progress' AND title ILIKE $2
+            ORDER BY 
+              COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
+              CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+            LIMIT $3
+            """,
+            user_id, search_pattern, limit
+        )
+        return [dict(row) for row in rows]
+
+
+async def get_filtered_tasks(
+    user_id: int, 
+    category: Optional[str] = None, 
+    priority: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Отримати завдання з фільтрацією за категорією або пріоритетом."""
+    query = "SELECT * FROM tasks WHERE user_id = $1 AND status = 'in_progress'"
+    params = [user_id]
+    param_idx = 2
+    
+    if category:
+        query += f" AND category = ${param_idx}"
+        params.append(category)
+        param_idx += 1
+    if priority:
+        query += f" AND priority = ${param_idx}"
+        params.append(priority)
+        param_idx += 1
+        
+    query += """
+        ORDER BY 
+          COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
+          CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+    """
+    
+    async with get_connection() as conn:
+        rows = await conn.fetch(query, *params)
+        return [dict(row) for row in rows]
+
+
 async def delete_task(task_id: int, user_id: int) -> bool:
     """Видалити завдання остаточно."""
     async with get_connection() as conn:

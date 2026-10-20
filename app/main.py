@@ -1,52 +1,73 @@
+"""Головний файл запуску бота."""
+
 import asyncio
 import logging
-import sys
+import os
+
+from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import config
-from app.database.connection import init_db
+from app.database.migrations import run_migrations
 from app.handlers import start, tasks
 
-async def main() -> None:
-    # Налаштування базового логування
-    logging.basicConfig(
-        level=getattr(logging, config.LOG_LEVEL, logging.INFO),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ]
-    )
-    logger = logging.getLogger(__name__)
-    logger.info("Ініціалізація бота...")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-    # Ініціалізація БД
-    await init_db()
+
+async def handle_ping(request):
+    """Обробник для UptimeRobot та перевірки здоров'я Render."""
+    return web.Response(text="Bot is alive and polling!")
+
+
+async def start_web_server():
+    """Запускає веб-сервер, щоб Render бачив відкритий порт і не вбивав процес."""
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    
+    # Render автоматично передає змінну PORT. Ми використовуємо 10000 як надійний фолбек.
+    port = int(os.getenv("PORT", 10000))
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"✅ Веб-сервер успішно запущено і тримає порт {port}")
+    
+    # Цей рядок критично важливий для Render: він не дає функції завершитися
+    await asyncio.Event().wait()
+
+
+async def main() -> None:
+    logger.info("Ініціалізація бота...")
+    
+    await run_migrations()
     logger.info("База даних ініціалізовано")
 
-    # Створюємо DefaultBotProperties
-    default_props = DefaultBotProperties(parse_mode=ParseMode.HTML)
-    bot = Bot(token=config.BOT_TOKEN, default=default_props)
-    
-    # Створюємо MemoryStorage для FSM
-    storage = MemoryStorage()
-    dp = Dispatcher(storage=storage)
+    bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
+    dp = Dispatcher(storage=MemoryStorage())
 
-    # Підключення роутерів
     dp.include_router(start.router)
     dp.include_router(tasks.router)
 
     logger.info("Бот успішно запущено у режимі polling.")
-    
+
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        # Запускаємо обидва процеси паралельно і назавжди
+        await asyncio.gather(
+            dp.start_polling(bot),
+            start_web_server()
+        )
+    except asyncio.CancelledError:
+        logger.info("Отримано сигнал завершення роботи")
     finally:
         await bot.session.close()
 
+
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logging.info("Бот зупинено користувачем.")
+    asyncio.run(main())

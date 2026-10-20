@@ -133,3 +133,9 @@ async def delete_task(task_id: int, user_id: int) -> dict:
                 logger.exception(f"Не вдалося видалити правило-сироту {rule_id}")
     
     return {"status": "success", "message": "Завдання видалено"}
+
+async def search_tasks(user_id: int, query: str) -> List[Dict[str, Any]]:
+    return await task_repository.search_tasks(user_id, query)
+
+async def get_filtered_tasks(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
+    return await task_repository.get_filtered_tasks(user_id, category, priority)
