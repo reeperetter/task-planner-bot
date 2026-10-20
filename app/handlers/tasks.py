@@ -261,11 +261,10 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
         buttons = []
         for task in chunk:
             task_id = task['id']
-            label = (task.get("title") or "Завдання").replace("\n", " ")[:18]
+            label = (task.get("title") or "Завдання").replace("\n", " ")[:22]
             buttons.append([
                 types.InlineKeyboardButton(text="✏️", callback_data=f"edit_menu_{task_id}"),
-                types.InlineKeyboardButton(text=f"📌 {label}", callback_data="ignore"),
-                types.InlineKeyboardButton(text="🗑️", callback_data=f"delete_{task_id}"),
+                types.InlineKeyboardButton(text=f"🗑️ {label}", callback_data=f"delete_{task_id}"),
             ])
 
         await message.answer(
