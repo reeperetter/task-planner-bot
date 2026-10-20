@@ -1,28 +1,42 @@
+"""Модуль для підключення до бази даних (гібридний: PostgreSQL або SQLite)."""
+
+import logging
+import asyncpg
 import aiosqlite
-from pathlib import Path
 from contextlib import asynccontextmanager
 from app.config import config
 
-_db_path = Path(config.DATABASE_PATH)
+logger = logging.getLogger(__name__)
+
+# Глобальний пул з'єднань для PostgreSQL
+postgres_pool: asyncpg.Pool | None = None
+
+async def init_db():
+    """Ініціалізація пулу з'єднань (тільки для PostgreSQL)."""
+    global postgres_pool
+    if config.DATABASE_URL:
+        logger.info("Ініціалізація пулу з'єднань PostgreSQL (Neon)...")
+        postgres_pool = await asyncpg.create_pool(
+            config.DATABASE_URL,
+            min_size=1,
+            max_size=5,
+            server_settings={'jit': 'off'}  # Оптимізація для Neon
+        )
+        logger.info("✅ Пул з'єднань PostgreSQL успішно створено")
+    else:
+        logger.info("DATABASE_URL не знайдено. Використовується локальний SQLite.")
 
 @asynccontextmanager
 async def get_connection():
-    """Отримати асинхронне з'єднання з базою даних як контекстний менеджер"""
-    conn = await aiosqlite.connect(_db_path)
-    conn.row_factory = aiosqlite.Row
-    # Увімкнення зовнішніх ключів
-    await conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-    finally:
-        await conn.close()
-
-async def init_db() -> None:
-    """Ініціалізація бази даних: створення таблиць та міграції"""
-    from app.database.migrations import run_migrations
-    
-    # Створюємо директорію для БД, якщо її немає
-    _db_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Запускаємо міграції
-    await run_migrations()
+    """Надає з'єднання з БД залежно від конфігурації."""
+    if config.DATABASE_URL:
+        # Режим PostgreSQL (Neon)
+        if postgres_pool is None:
+            await init_db()
+        async with postgres_pool.acquire() as conn:
+            yield conn
+    else:
+        # Режим SQLite (локальна розробка)
+        async with aiosqlite.connect(config.DATABASE_PATH) as conn:
+            conn.row_factory = aiosqlite.Row
+            yield conn

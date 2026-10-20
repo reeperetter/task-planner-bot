@@ -1,9 +1,12 @@
+"""Репозиторій для роботи із завданнями (PostgreSQL)."""
+
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from app.database.connection import get_connection
 
 logger = logging.getLogger(__name__)
+
 
 async def create_task(
     user_id: int,
@@ -14,228 +17,175 @@ async def create_task(
     due_date: Optional[str] = None,
     recurrence_rule_id: Optional[int] = None,
 ) -> int:
-    """Створити нове завдання та повернути його ID"""
+    """Створити нове завдання та повернути його ID."""
+    # Перетворюємо рядки на datetime об'єкти
+    due_at_dt = datetime.fromisoformat(due_at) if due_at else None
+    due_date_dt = date.fromisoformat(due_date) if due_date else None
+    
     async with get_connection() as conn:
-        cursor = await conn.execute(
+        row = await conn.fetchrow(
             """
             INSERT INTO tasks 
             (user_id, title, category, status, priority, due_at, due_date, 
              recurrence_rule_id, created_at, updated_at)
-            VALUES (?, ?, ?, 'in_progress', ?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, 'in_progress', $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id
             """,
-            (user_id, title, category, priority, due_at, due_date, 
-             recurrence_rule_id, datetime.utcnow().isoformat(), datetime.utcnow().isoformat())
+            user_id, title, category, priority, due_at_dt, due_date_dt, recurrence_rule_id
         )
-        await conn.commit()
-        task_id = cursor.lastrowid
-        logger.info(f"Створено завдання: task_id={task_id}, user_id={user_id}")
-        return task_id
+        logger.info(f"Створено завдання: task_id={row['id']}, user_id={user_id}")
+        return row['id']
 
-async def get_task(task_id: int, user_id: int) -> Optional[dict]:
-    """Отримати завдання за ID з перевіркою власника"""
+
+async def get_task(task_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    """Отримати завдання за ID з перевіркою власника."""
     async with get_connection() as conn:
-        cursor = await conn.execute(
-            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
-            (task_id, user_id)
+        row = await conn.fetchrow(
+            "SELECT * FROM tasks WHERE id = $1 AND user_id = $2",
+            task_id, user_id
         )
-        row = await cursor.fetchone()
-        if row:
-            return dict(row)
-        return None
+        return dict(row) if row else None
 
-async def get_tasks_for_date(user_id: int, target_date: date) -> List[dict]:
-    """Отримати завдання на конкретну дату"""
-    date_str = target_date.isoformat()
-    day_start = f"{date_str}T00:00:00"
-    day_end = f"{date_str}T23:59:59"
+
+async def get_tasks_for_date(user_id: int, target_date: date) -> List[Dict[str, Any]]:
+    """Отримати завдання на конкретну дату."""
+    day_start = datetime.combine(target_date, datetime.min.time())
+    day_end = datetime.combine(target_date, datetime.max.time())
     
     async with get_connection() as conn:
-        cursor = await conn.execute(
+        rows = await conn.fetch(
             """
             SELECT * FROM tasks 
-            WHERE user_id = ? AND status = 'in_progress'
+            WHERE user_id = $1 AND status = 'in_progress'
               AND (
-                due_date = ?
-                OR (due_at >= ? AND due_at <= ?)
+                due_date = $2
+                OR (due_at >= $3 AND due_at <= $4)
               )
             ORDER BY 
-              COALESCE(due_at, due_date || 'T00:00:00') ASC,
+              COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
               CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
             """,
-            (user_id, date_str, day_start, day_end)
+            user_id, target_date, day_start, day_end
         )
-        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-async def get_tasks_for_date_range(user_id: int, date_from: date, date_to: date) -> List[dict]:
-    """Отримати завдання в діапазоні дат"""
-    from_str = date_from.isoformat()
-    to_str = date_to.isoformat()
-    day_start = f"{from_str}T00:00:00"
-    day_end = f"{to_str}T23:59:59"
+
+async def get_tasks_for_date_range(user_id: int, date_from: date, date_to: date) -> List[Dict[str, Any]]:
+    """Отримати завдання в діапазоні дат."""
+    day_start = datetime.combine(date_from, datetime.min.time())
+    day_end = datetime.combine(date_to, datetime.max.time())
     
     async with get_connection() as conn:
-        cursor = await conn.execute(
+        rows = await conn.fetch(
             """
             SELECT * FROM tasks 
-            WHERE user_id = ? AND status = 'in_progress'
+            WHERE user_id = $1 AND status = 'in_progress'
               AND (
-                (due_date >= ? AND due_date <= ?)
-                OR (due_at >= ? AND due_at <= ?)
+                (due_date >= $2 AND due_date <= $3)
+                OR (due_at >= $4 AND due_at <= $5)
               )
             ORDER BY 
-              COALESCE(due_at, due_date || 'T00:00:00') ASC,
+              COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
               CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
             """,
-            (user_id, from_str, to_str, day_start, day_end)
+            user_id, date_from, date_to, day_start, day_end
         )
-        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-async def get_planned_tasks(user_id: int) -> List[dict]:
+
+async def get_planned_tasks(user_id: int) -> List[Dict[str, Any]]:
     """Отримати ЗАПЛАНОВАНІ завдання — сьогодні + майбутнє."""
     today = date.today()
-    today_str = today.isoformat()
-    day_start = f"{today_str}T00:00:00"
+    day_start = datetime.combine(today, datetime.min.time())
     
     async with get_connection() as conn:
-        cursor = await conn.execute(
+        rows = await conn.fetch(
             """
             SELECT * FROM tasks 
-            WHERE user_id = ? AND status = 'in_progress'
+            WHERE user_id = $1 AND status = 'in_progress'
               AND (
-                due_date >= ?
-                OR due_at >= ?
+                due_date >= $2
+                OR due_at >= $3
               )
             ORDER BY 
-              COALESCE(due_at, due_date || 'T00:00:00') ASC,
+              COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
               CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
             """,
-            (user_id, today_str, day_start)
+            user_id, today, day_start
         )
-        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-async def get_done_tasks(user_id: int) -> List[dict]:
+
+async def get_done_tasks(user_id: int) -> List[Dict[str, Any]]:
     """Отримати ВИКОНАНІ завдання — ті, строк яких минув."""
     today = date.today()
-    today_str = today.isoformat()
-    day_start = f"{today_str}T00:00:00"
+    day_start = datetime.combine(today, datetime.min.time())
     
     async with get_connection() as conn:
-        cursor = await conn.execute(
+        rows = await conn.fetch(
             """
             SELECT * FROM tasks 
-            WHERE user_id = ? AND status = 'in_progress'
+            WHERE user_id = $1 AND status = 'in_progress'
               AND (
-                due_date < ?
-                OR due_at < ?
+                due_date < $2
+                OR due_at < $3
               )
             ORDER BY 
-              COALESCE(due_at, due_date || 'T00:00:00') ASC,
+              COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
               CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
             """,
-            (user_id, today_str, day_start)
+            user_id, today, day_start
         )
-        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-async def get_recurring_tasks(user_id: int) -> List[dict]:
-    """
-    Отримати всі активні повторювані завдання користувача.
-    Тобто ті, що мають recurrence_rule_id IS NOT NULL і status = 'in_progress'.
-    """
+
+async def get_recurring_tasks(user_id: int) -> List[Dict[str, Any]]:
+    """Отримати всі активні повторювані завдання користувача."""
     async with get_connection() as conn:
-        cursor = await conn.execute(
+        rows = await conn.fetch(
             """
             SELECT * FROM tasks 
-            WHERE user_id = ? 
+            WHERE user_id = $1 
               AND status = 'in_progress'
               AND recurrence_rule_id IS NOT NULL
             ORDER BY 
-              COALESCE(due_at, due_date || 'T00:00:00') ASC,
+              COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
               CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
             """,
-            (user_id,)
+            user_id
         )
-        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
 
 async def count_active_tasks_by_rule(rule_id: int) -> int:
     """Порахувати кількість активних завдань із цим правилом повторення."""
     async with get_connection() as conn:
-        cursor = await conn.execute(
-            """
-            SELECT COUNT(*) as cnt FROM tasks
-            WHERE recurrence_rule_id = ? AND status = 'in_progress'
-            """,
-            (rule_id,)
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) as cnt FROM tasks WHERE recurrence_rule_id = $1 AND status = 'in_progress'",
+            rule_id
         )
-        row = await cursor.fetchone()
-        return row["cnt"] if row else 0
+        return row['cnt'] if row else 0
 
-async def get_tasks_by_filter(
-    user_id: int,
-    status: Optional[str] = None,
-    category: Optional[str] = None,
-    priority: Optional[str] = None,
-    has_due_date: Optional[bool] = None,
-    limit: int = 50
-) -> List[dict]:
-    """Отримати список завдань за фільтрами"""
-    query = "SELECT * FROM tasks WHERE user_id = ?"
-    params = [user_id]
-    
-    if status:
-        query += " AND status = ?"
-        params.append(status)
-    
-    if category:
-        query += " AND category = ?"
-        params.append(category)
-    
-    if priority:
-        query += " AND priority = ?"
-        params.append(priority)
-    
-    if has_due_date is not None:
-        if has_due_date:
-            query += " AND (due_date IS NOT NULL OR due_at IS NOT NULL)"
-        else:
-            query += " AND due_date IS NULL AND due_at IS NULL"
-    
-    query += """
-        ORDER BY 
-          COALESCE(due_at, due_date || 'T00:00:00') ASC,
-          CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
-        LIMIT ?
-    """
-    params.append(limit)
-    
-    async with get_connection() as conn:
-        cursor = await conn.execute(query, params)
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
 
-async def get_tasks_without_due_date(user_id: int) -> List[dict]:
-    """Отримати активні завдання без жодного строку"""
+async def get_tasks_without_due_date(user_id: int) -> List[Dict[str, Any]]:
+    """Отримати активні завдання без жодного строку."""
     async with get_connection() as conn:
-        cursor = await conn.execute(
+        rows = await conn.fetch(
             """
             SELECT * FROM tasks 
-            WHERE user_id = ? AND status = 'in_progress'
+            WHERE user_id = $1 AND status = 'in_progress'
               AND due_date IS NULL AND due_at IS NULL
             ORDER BY 
               CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END,
               created_at DESC
             """,
-            (user_id,)
+            user_id
         )
-        rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
+
 async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
-    """Оновити завдання"""
+    """Оновити завдання."""
     if not kwargs:
         return False
     
@@ -245,29 +195,37 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
     }
     update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
     
+    # Перетворюємо рядки дат на datetime об'єкти
+    if 'due_at' in update_fields and isinstance(update_fields['due_at'], str):
+        update_fields['due_at'] = datetime.fromisoformat(update_fields['due_at'])
+    if 'due_date' in update_fields and isinstance(update_fields['due_date'], str):
+        update_fields['due_date'] = date.fromisoformat(update_fields['due_date'])
+    if 'completed_at' in update_fields and isinstance(update_fields['completed_at'], str):
+        update_fields['completed_at'] = datetime.fromisoformat(update_fields['completed_at'])
+    
     if not update_fields:
         logger.warning(f"Спроба оновити недозволені поля: {kwargs.keys()}")
         return False
     
-    update_fields['updated_at'] = datetime.utcnow().isoformat()
-    
-    set_clause = ", ".join(f"{k} = ?" for k in update_fields.keys())
+    set_clause = ", ".join(f"{k} = ${i+3}" for i, k in enumerate(update_fields.keys()))
     values = list(update_fields.values()) + [task_id, user_id]
     
+    query = f"""
+        UPDATE tasks 
+        SET {set_clause}, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = ${len(values)-1} AND user_id = ${len(values)}
+    """
+    
     async with get_connection() as conn:
-        cursor = await conn.execute(
-            f"UPDATE tasks SET {set_clause} WHERE id = ? AND user_id = ?",
-            values
-        )
-        await conn.commit()
-        return cursor.rowcount > 0
+        status = await conn.execute(query, *values)
+        return "UPDATE 1" in status
+
 
 async def delete_task(task_id: int, user_id: int) -> bool:
-    """Видалити завдання остаточно"""
+    """Видалити завдання остаточно."""
     async with get_connection() as conn:
-        cursor = await conn.execute(
-            "DELETE FROM tasks WHERE id = ? AND user_id = ?",
-            (task_id, user_id)
+        status = await conn.execute(
+            "DELETE FROM tasks WHERE id = $1 AND user_id = $2",
+            task_id, user_id
         )
-        await conn.commit()
-        return cursor.rowcount > 0
+        return "DELETE 1" in status
