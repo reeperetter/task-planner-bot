@@ -268,20 +268,19 @@ async def _send_tasks_list(
         
         body = "\n\n".join(body_parts)
 
-        buttons = []
+         buttons = []
         for task in chunk:
             task_id = task['id']
-            # Тепер кнопки містять ТІЛЬКИ іконки, текст не дублюється
+            # Обрізаємо назву до 18 символів, щоб влізло в одну кнопку
+            label = (task.get("title") or "Завдання").replace("\n", " ")[:18]
+            
+            # Три кнопки: [✏️] [📌 Назва] [🗑️]
+            # callback_data="ignore" робить середню кнопку неактивною (просто текст)
             buttons.append([
                 types.InlineKeyboardButton(text="✏️", callback_data=f"edit_menu_{task_id}"),
+                types.InlineKeyboardButton(text=f"📌 {label}", callback_data="ignore"),
                 types.InlineKeyboardButton(text="🗑️", callback_data=f"delete_{task_id}"),
             ])
-
-        await message.answer(
-            f"{header}\n\n{body}",
-            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None,
-            parse_mode="HTML",
-        )
 
 
 async def _show_task_list(

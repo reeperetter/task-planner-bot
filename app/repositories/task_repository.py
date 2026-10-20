@@ -186,6 +186,8 @@ async def get_tasks_without_due_date(user_id: int) -> List[Dict[str, Any]]:
 
 async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
     """Оновити завдання."""
+    logger.info(f"🔧 Виклик update_task: task_id={task_id}, user_id={user_id}, kwargs={kwargs}")
+    
     if not kwargs:
         return False
     
@@ -199,19 +201,26 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
         update_fields['due_date'] = date.fromisoformat(update_fields['due_date'])
     if 'completed_at' in update_fields and isinstance(update_fields['completed_at'], str):
         update_fields['completed_at'] = datetime.fromisoformat(update_fields['completed_at'])
-    
+        
     if not update_fields:
-        logger.warning(f"Спроба оновити недозволені поля: {kwargs.keys()}")
+        logger.warning(f"⚠️ Спроба оновити недозволені поля: {kwargs.keys()}")
         return False
     
     set_clause = ", ".join(f"{k} = ${i+3}" for i, k in enumerate(update_fields.keys()))
     values = list(update_fields.values()) + [task_id, user_id]
     
     query = f"UPDATE tasks SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ${len(values)-1} AND user_id = ${len(values)}"
+    logger.info(f"🔧 SQL запит: {query}")
+    logger.info(f"🔧 Параметри: {values}")
     
     async with get_connection() as conn:
-        status = await conn.execute(query, *values)
-        return "UPDATE 1" in status
+        try:
+            status = await conn.execute(query, *values)
+            logger.info(f"🔧 Результат UPDATE з БД: {status}")
+            return "UPDATE 1" in status
+        except Exception as e:
+            logger.error(f"🔧 КРИТИЧНА ПОМИЛКА SQL при оновленні: {e}", exc_info=True)
+            return False
 
 
 async def search_tasks(user_id: int, query: str, limit: int = 20) -> List[Dict[str, Any]]:
