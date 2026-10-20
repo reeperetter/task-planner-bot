@@ -14,6 +14,8 @@ aiosqlite==0.22.1
     # via task-planner-bot (pyproject.toml)
 annotated-types==0.8.0
     # via pydantic
+asyncpg==0.32.0
+    # via task-planner-bot (pyproject.toml)
 attrs==26.1.0
     # via aiohttp
 certifi==2026.10.18
