@@ -40,6 +40,8 @@ class EditState(StatesGroup):
     waiting_for_new_title = State()
     waiting_for_new_date = State()
 
+class ListState(StatesGroup):
+    showing_list = State()
 
 # =============================================================================
 # КОНСТАНТИ
@@ -223,7 +225,7 @@ def _format_task_line(task: dict, index: int = 0) -> str:
         return f"<b>{title}</b>\n   {date_and_meta}"
 
 
-async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]) -> None:
+async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict], category: Optional[str] = None, priority: Optional[str] = None) -> None:
     if not tasks:
         await message.answer(f"<b>{_escape(title)}</b>\n\n📭 Завдань не знайдено.", parse_mode="HTML")
         return
@@ -257,7 +259,7 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
             body_parts.append(_format_task_line(task, global_index))
         body = "\n\n".join(body_parts)
 
-        # 3 кнопки в ряд: ✏️ | 📌 Назва | 🗑️
+        # Кнопки завдань
         buttons = []
         for task in chunk:
             task_id = task['id']
@@ -267,6 +269,45 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
                 types.InlineKeyboardButton(text=f"🗑️ {label}", callback_data=f"delete_{task_id}"),
             ])
 
+        # Кнопки фільтрів (додаємо в кінці)
+        filter_buttons = []
+        
+        # Кнопки категорії
+        if category == "personal":
+            filter_buttons.append(types.InlineKeyboardButton(text="✅ 👤 Особисті", callback_data="filter_reset"))
+        else:
+            filter_buttons.append(types.InlineKeyboardButton(text="👤 Особисті", callback_data="filter_category_personal"))
+            
+        if category == "work":
+            filter_buttons.append(types.InlineKeyboardButton(text="✅ 💼 Робочі", callback_data="filter_reset"))
+        else:
+            filter_buttons.append(types.InlineKeyboardButton(text="💼 Робочі", callback_data="filter_category_work"))
+        
+        buttons.append(filter_buttons)
+        
+        # Кнопки пріоритету
+        priority_buttons = []
+        if priority == "high":
+            priority_buttons.append(types.InlineKeyboardButton(text="✅ 🔴 Високий", callback_data="filter_reset"))
+        else:
+            priority_buttons.append(types.InlineKeyboardButton(text="🔴 Високий", callback_data="filter_priority_high"))
+            
+        if priority == "normal":
+            priority_buttons.append(types.InlineKeyboardButton(text="✅ 🟡 Звичайний", callback_data="filter_reset"))
+        else:
+            priority_buttons.append(types.InlineKeyboardButton(text="🟡 Звичайний", callback_data="filter_priority_normal"))
+            
+        if priority == "low":
+            priority_buttons.append(types.InlineKeyboardButton(text="✅ 🔵 Низький", callback_data="filter_reset"))
+        else:
+            priority_buttons.append(types.InlineKeyboardButton(text="🔵 Низький", callback_data="filter_priority_low"))
+        
+        buttons.append(priority_buttons)
+        
+        # Кнопка скинути фільтри (якщо є активні фільтри)
+        if category or priority:
+            buttons.append([types.InlineKeyboardButton(text="🔄 Скинути фільтри", callback_data="filter_reset")])
+
         await message.answer(
             f"{header}\n\n{body}",
             reply_markup=types.InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None,
@@ -274,21 +315,33 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
         )
 
 
-async def _show_task_list(message: types.Message, state: FSMContext, title: str, fetch_func) -> None:
-    await state.clear()
+async def _show_task_list(message: types.Message, state: FSMContext, title: str, fetch_func, category: Optional[str] = None, priority: Optional[str] = None) -> None:
     user_id = await user_repository.get_user_id_by_telegram_id(message.from_user.id)
     if user_id is None:
         await message.answer("👋 Спочатку натисніть /start, щоб зареєструватися.", reply_markup=get_main_menu_keyboard())
         return
 
     try:
-        tasks = await fetch_func(user_id)
+        # Викликаємо функцію з фільтрами, якщо вони є
+        if category or priority:
+            tasks = await fetch_func(user_id, category, priority)
+        else:
+            tasks = await fetch_func(user_id)
     except Exception:
         logger.exception("Не вдалося отримати список завдань: %s", title)
         await message.answer("⚠️ Не вдалося отримати список завдань. Спробуйте ще раз.")
         return
 
-    await _send_tasks_list(message, title, tasks)
+    # Зберігаємо стан списку та фільтрів
+    await state.update_data(
+        current_list_title=title,
+        current_list_func=fetch_func.__name__,
+        current_category=category,
+        current_priority=priority
+    )
+    await state.set_state(ListState.showing_list)
+
+    await _send_tasks_list(message, title, tasks, category, priority)
 
 
 def _format_recurrence_line(recurrence: dict) -> str:
@@ -389,36 +442,42 @@ async def cmd_add_task(message: types.Message, state: FSMContext) -> None:
 @router.message(Command("today"))
 @router.message(F.text == "📅 На сьогодні")
 async def show_today(message: types.Message, state: FSMContext) -> None:
+    await state.clear()
     await _show_task_list(message, state, "📅 Завдання на сьогодні", task_service.get_tasks_today)
 
 
 @router.message(Command("tomorrow"))
 @router.message(F.text == "📆 На завтра")
 async def show_tomorrow(message: types.Message, state: FSMContext) -> None:
+    await state.clear()
     await _show_task_list(message, state, "📆 Завдання на завтра", task_service.get_tasks_tomorrow)
 
 
 @router.message(Command("week"))
 @router.message(F.text == "📊 Наступні 7 днів")
 async def show_week(message: types.Message, state: FSMContext) -> None:
+    await state.clear()
     await _show_task_list(message, state, "📊 Завдання на наступні 7 днів", task_service.get_tasks_week)
 
 
 @router.message(Command("planned"))
 @router.message(F.text == "📋 Заплановані")
 async def show_planned(message: types.Message, state: FSMContext) -> None:
+    await state.clear()
     await _show_task_list(message, state, "📋 Заплановані завдання", task_service.get_planned_tasks)
 
 
 @router.message(Command("done"))
 @router.message(F.text == "✅ Виконані")
 async def show_done(message: types.Message, state: FSMContext) -> None:
+    await state.clear()
     await _show_task_list(message, state, "✅ Виконані завдання (строк минув)", task_service.get_done_tasks)
 
 
 @router.message(Command("recurring"))
 @router.message(F.text == "🔄 Повторювані")
 async def show_recurring(message: types.Message, state: FSMContext) -> None:
+    await state.clear()
     await _show_task_list(message, state, "🔄 Повторювані завдання", task_service.get_recurring_tasks)
 
 
@@ -806,6 +865,72 @@ async def unknown_callback(callback: types.CallbackQuery) -> None:
         logger.debug("Невідомий callback: %s", callback.data)
     await callback.answer()
 
+
+# --- ФІЛЬТРИ ---
+
+@router.callback_query(F.data == "filter_category_personal")
+async def filter_category_personal(callback: types.CallbackQuery, state: FSMContext) -> None:
+    await _apply_filter(callback, state, category="personal")
+
+@router.callback_query(F.data == "filter_category_work")
+async def filter_category_work(callback: types.CallbackQuery, state: FSMContext) -> None:
+    await _apply_filter(callback, state, category="work")
+
+@router.callback_query(F.data == "filter_priority_high")
+async def filter_priority_high(callback: types.CallbackQuery, state: FSMContext) -> None:
+    await _apply_filter(callback, state, priority="high")
+
+@router.callback_query(F.data == "filter_priority_normal")
+async def filter_priority_normal(callback: types.CallbackQuery, state: FSMContext) -> None:
+    await _apply_filter(callback, state, priority="normal")
+
+@router.callback_query(F.data == "filter_priority_low")
+async def filter_priority_low(callback: types.CallbackQuery, state: FSMContext) -> None:
+    await _apply_filter(callback, state, priority="low")
+
+@router.callback_query(F.data == "filter_reset")
+async def filter_reset(callback: types.CallbackQuery, state: FSMContext) -> None:
+    await _apply_filter(callback, state, category=None, priority=None)
+
+async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, category: Optional[str] = None, priority: Optional[str] = None) -> None:
+    data = await state.get_data()
+    list_func_name = data.get("current_list_func")
+    title = data.get("current_list_title", "Завдання")
+    
+    # Мапінг імен функцій
+    func_map = {
+        "get_tasks_today": task_service.get_tasks_today_filtered,
+        "get_tasks_tomorrow": task_service.get_tasks_tomorrow_filtered,
+        "get_tasks_week": task_service.get_tasks_week_filtered,
+        "get_planned_tasks": task_service.get_planned_tasks_filtered,
+        "get_done_tasks": task_service.get_done_tasks_filtered,
+        "get_recurring_tasks": task_service.get_recurring_tasks_filtered,
+    }
+    
+    fetch_func = func_map.get(list_func_name)
+    if not fetch_func:
+        await callback.answer("Помилка: не вдалося визначити тип списку.", show_alert=True)
+        return
+    
+    user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
+    if user_id is None:
+        await callback.answer("Користувача не знайдено.", show_alert=True)
+        return
+    
+    try:
+        tasks = await fetch_func(user_id, category, priority)
+    except Exception:
+        logger.exception("Помилка отримання завдань з фільтрами")
+        await callback.answer("⚠️ Не вдалося отримати завдання.", show_alert=True)
+        return
+    
+    # Оновлюємо стан
+    await state.update_data(current_category=category, current_priority=priority)
+    
+    # Видаляємо старе повідомлення і відправляємо нове
+    await callback.message.delete()
+    await _send_tasks_list(callback.message, title, tasks, category, priority)
+    await callback.answer()
 
 # =============================================================================
 # 3. FSM: ПОКРОКОВЕ СТВОРЕННЯ

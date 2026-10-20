@@ -139,3 +139,25 @@ async def search_tasks(user_id: int, query: str) -> List[Dict[str, Any]]:
 
 async def get_filtered_tasks(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
     return await task_repository.get_filtered_tasks(user_id, category, priority)
+
+async def get_tasks_today_filtered(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
+    today = date.today()
+    return await task_repository.get_tasks_for_date_filtered(user_id, today, category, priority)
+
+async def get_tasks_tomorrow_filtered(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
+    tomorrow = date.today() + timedelta(days=1)
+    return await task_repository.get_tasks_for_date_filtered(user_id, tomorrow, category, priority)
+
+async def get_tasks_week_filtered(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
+    today = date.today()
+    week_end = today + timedelta(days=6)
+    return await task_repository.get_tasks_for_date_range_filtered(user_id, today, week_end, category, priority)
+
+async def get_planned_tasks_filtered(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
+    return await task_repository.get_planned_tasks_filtered(user_id, category, priority)
+
+async def get_done_tasks_filtered(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
+    return await task_repository.get_done_tasks_filtered(user_id, category, priority)
+
+async def get_recurring_tasks_filtered(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
+    return await task_repository.get_recurring_tasks_filtered(user_id, category, priority)

@@ -271,6 +271,204 @@ async def get_filtered_tasks(
         return [dict(row) for row in rows]
 
 
+async def get_tasks_for_date_filtered(
+    user_id: int, 
+    target_date: date,
+    category: Optional[str] = None,
+    priority: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Отримати завдання на конкретну дату з фільтрами."""
+    day_start = datetime.combine(target_date, datetime.min.time())
+    day_end = datetime.combine(target_date, datetime.max.time())
+    
+    query = """
+        SELECT * FROM tasks 
+        WHERE user_id = $1 AND status = 'in_progress'
+          AND (
+            due_date = $2
+            OR (due_at >= $3 AND due_at <= $4)
+          )
+    """
+    params = [user_id, target_date, day_start, day_end]
+    param_idx = 5
+    
+    if category:
+        query += f" AND category = ${param_idx}"
+        params.append(category)
+        param_idx += 1
+    if priority:
+        query += f" AND priority = ${param_idx}"
+        params.append(priority)
+        param_idx += 1
+        
+    query += """
+        ORDER BY 
+          COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
+          CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+    """
+    
+    async with get_connection() as conn:
+        rows = await conn.fetch(query, *params)
+        return [dict(row) for row in rows]
+
+
+async def get_tasks_for_date_range_filtered(
+    user_id: int,
+    date_from: date,
+    date_to: date,
+    category: Optional[str] = None,
+    priority: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Отримати завдання в діапазоні дат з фільтрами."""
+    day_start = datetime.combine(date_from, datetime.min.time())
+    day_end = datetime.combine(date_to, datetime.max.time())
+    
+    query = """
+        SELECT * FROM tasks 
+        WHERE user_id = $1 AND status = 'in_progress'
+          AND (
+            (due_date >= $2 AND due_date <= $3)
+            OR (due_at >= $4 AND due_at <= $5)
+          )
+    """
+    params = [user_id, date_from, date_to, day_start, day_end]
+    param_idx = 6
+    
+    if category:
+        query += f" AND category = ${param_idx}"
+        params.append(category)
+        param_idx += 1
+    if priority:
+        query += f" AND priority = ${param_idx}"
+        params.append(priority)
+        param_idx += 1
+        
+    query += """
+        ORDER BY 
+          COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
+          CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+    """
+    
+    async with get_connection() as conn:
+        rows = await conn.fetch(query, *params)
+        return [dict(row) for row in rows]
+
+
+async def get_planned_tasks_filtered(
+    user_id: int,
+    category: Optional[str] = None,
+    priority: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Отримати ЗАПЛАНОВАНІ завдання з фільтрами."""
+    today = date.today()
+    day_start = datetime.combine(today, datetime.min.time())
+    
+    query = """
+        SELECT * FROM tasks 
+        WHERE user_id = $1 AND status = 'in_progress'
+          AND (
+            due_date >= $2
+            OR due_at >= $3
+          )
+    """
+    params = [user_id, today, day_start]
+    param_idx = 4
+    
+    if category:
+        query += f" AND category = ${param_idx}"
+        params.append(category)
+        param_idx += 1
+    if priority:
+        query += f" AND priority = ${param_idx}"
+        params.append(priority)
+        param_idx += 1
+        
+    query += """
+        ORDER BY 
+          COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
+          CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+    """
+    
+    async with get_connection() as conn:
+        rows = await conn.fetch(query, *params)
+        return [dict(row) for row in rows]
+
+
+async def get_done_tasks_filtered(
+    user_id: int,
+    category: Optional[str] = None,
+    priority: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Отримати ВИКОНАНІ завдання з фільтрами."""
+    today = date.today()
+    day_start = datetime.combine(today, datetime.min.time())
+    
+    query = """
+        SELECT * FROM tasks 
+        WHERE user_id = $1 AND status = 'in_progress'
+          AND (
+            due_date < $2
+            OR due_at < $3
+          )
+    """
+    params = [user_id, today, day_start]
+    param_idx = 4
+    
+    if category:
+        query += f" AND category = ${param_idx}"
+        params.append(category)
+        param_idx += 1
+    if priority:
+        query += f" AND priority = ${param_idx}"
+        params.append(priority)
+        param_idx += 1
+        
+    query += """
+        ORDER BY 
+          COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
+          CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+    """
+    
+    async with get_connection() as conn:
+        rows = await conn.fetch(query, *params)
+        return [dict(row) for row in rows]
+
+
+async def get_recurring_tasks_filtered(
+    user_id: int,
+    category: Optional[str] = None,
+    priority: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Отримати всі активні повторювані завдання з фільтрами."""
+    query = """
+        SELECT * FROM tasks 
+        WHERE user_id = $1 
+          AND status = 'in_progress'
+          AND recurrence_rule_id IS NOT NULL
+    """
+    params = [user_id]
+    param_idx = 2
+    
+    if category:
+        query += f" AND category = ${param_idx}"
+        params.append(category)
+        param_idx += 1
+    if priority:
+        query += f" AND priority = ${param_idx}"
+        params.append(priority)
+        param_idx += 1
+        
+    query += """
+        ORDER BY 
+          COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
+          CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+    """
+    
+    async with get_connection() as conn:
+        rows = await conn.fetch(query, *params)
+        return [dict(row) for row in rows]
+
+
 async def delete_task(task_id: int, user_id: int) -> bool:
     """Видалити завдання остаточно."""
     async with get_connection() as conn:
