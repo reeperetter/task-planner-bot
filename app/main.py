@@ -6,6 +6,7 @@ import os
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -49,7 +50,12 @@ async def main() -> None:
     await run_migrations()
     logger.info("База даних ініціалізовано")
 
-    bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
+    # ВИПРАВЛЕНО: новий синтаксис для aiogram 3.7.0+
+    bot = Bot(
+        token=config.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+    
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(start.router)
