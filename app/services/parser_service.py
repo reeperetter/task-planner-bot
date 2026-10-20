@@ -221,29 +221,18 @@ def parse_natural_language(text: str) -> dict:
     # =========================================================================
     # 4. ПОШУК ЧАСУ
     # =========================================================================
-    time_match = re.search(
-        r"(?:о|об|в)\s+(\d{1,2})[:\.](\d{2})|(\d{1,2})[:\.](\d{2})",
-        clean_text_for_time.lower(),
-    )
-
-    parsed_hour: Optional[int] = None
-    parsed_minute: Optional[int] = None
-
+    time_match = re.search(r'(?:о|в|об|о\s+)?\s*(\d{1,2}:\d{2})\b', text, re.IGNORECASE)
     if time_match:
-        h1, m1, h2, m2 = time_match.groups()
-        if h1 is not None:
-            parsed_hour = int(h1)
-            parsed_minute = int(m1)
-        else:
-            parsed_hour = int(h2)
-            parsed_minute = int(m2)
-
-        if 0 <= parsed_hour <= 23 and 0 <= parsed_minute <= 59:
-            logger.info(f"Знайдено час: {parsed_hour:02d}:{parsed_minute:02d}")
-        else:
-            logger.warning(f"Час невалідний: {parsed_hour}:{parsed_minute}, ігноруємо")
-            parsed_hour = None
-            parsed_minute = None
+        time_str = time_match.group(1)
+        # Перевіряємо, чи це валідний час
+        try:
+            parsed_time = datetime.strptime(time_str, "%H:%M").time()
+            result["due_at"] = f"{result.get('due_date', date.today().isoformat())}T{parsed_time.strftime('%H:%M:%S')}"
+            # Видаляємо час з назви, включаючи можливий прийменник
+            text = re.sub(r'(?:о|в|об|о\s+)?\s*\d{1,2}:\d{2}\b', '', text, flags=re.IGNORECASE).strip()
+            logger.info(f"Знайдено час: {time_str}, встановлено due_at: {result['due_at']}")
+        except ValueError:
+            pass
 
     # =========================================================================
     # 5. ФОРМУВАННЯ due_date / due_at

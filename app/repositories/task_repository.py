@@ -189,13 +189,10 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
     if not kwargs:
         return False
     
-    allowed_fields = {
-        'title', 'category', 'status', 'priority', 'due_at', 'due_date', 
-        'recurrence_rule_id', 'completed_at'
-    }
+    allowed_fields = {'title', 'category', 'status', 'priority', 'due_at', 'due_date', 'recurrence_rule_id', 'completed_at'}
     update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
     
-    # Перетворюємо рядки дат на datetime об'єкти
+    # Конвертація рядків у об'єкти дат для asyncpg
     if 'due_at' in update_fields and isinstance(update_fields['due_at'], str):
         update_fields['due_at'] = datetime.fromisoformat(update_fields['due_at'])
     if 'due_date' in update_fields and isinstance(update_fields['due_date'], str):
@@ -210,11 +207,7 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
     set_clause = ", ".join(f"{k} = ${i+3}" for i, k in enumerate(update_fields.keys()))
     values = list(update_fields.values()) + [task_id, user_id]
     
-    query = f"""
-        UPDATE tasks 
-        SET {set_clause}, updated_at = CURRENT_TIMESTAMP 
-        WHERE id = ${len(values)-1} AND user_id = ${len(values)}
-    """
+    query = f"UPDATE tasks SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ${len(values)-1} AND user_id = ${len(values)}"
     
     async with get_connection() as conn:
         status = await conn.execute(query, *values)

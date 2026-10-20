@@ -270,11 +270,11 @@ async def _send_tasks_list(
 
         buttons = []
         for task in chunk:
-            label = (task.get("title") or "Завдання").replace("\n", " ")[:20]
             task_id = task['id']
+            # Тепер кнопки містять ТІЛЬКИ іконки, текст не дублюється
             buttons.append([
-                types.InlineKeyboardButton(text=f"✏️ {label}", callback_data=f"edit_menu_{task_id}"),
-                types.InlineKeyboardButton(text=f"🗑️ {label}", callback_data=f"delete_{task_id}"),
+                types.InlineKeyboardButton(text="✏️", callback_data=f"edit_menu_{task_id}"),
+                types.InlineKeyboardButton(text="🗑️", callback_data=f"delete_{task_id}"),
             ])
 
         await message.answer(
@@ -975,28 +975,32 @@ async def process_search(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("edit_menu_"))
 async def open_edit_menu(callback: types.CallbackQuery):
-    task_id = int(callback.data.split("_")[-1])
-    user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
-    task = await task_service.get_task(task_id, user_id)
-    
-    if not task:
-        await callback.answer("Завдання не знайдено.", show_alert=True)
-        return
+    try:
+        task_id = int(callback.data.split("_")[-1])
+        user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
+        task = await task_service.get_task(task_id, user_id)
+        
+        if not task:
+            await callback.answer("Завдання не знайдено.", show_alert=True)
+            return
 
-    title = _escape(task.get("title"))
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="📝 Змінити назву", callback_data=f"edit_title_{task_id}")],
-        [types.InlineKeyboardButton(text="📅 Змінити дату", callback_data=f"edit_date_{task_id}")],
-        [types.InlineKeyboardButton(text="⭐ Змінити пріоритет", callback_data=f"edit_priority_{task_id}")],
-        [types.InlineKeyboardButton(text="↩️ Назад", callback_data="back_to_list")],
-    ])
-    
-    await callback.message.edit_text(
-        f"✏️ <b>Редагування завдання:</b>\n\n📝 {title}\n\nОберіть, що змінити:",
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
-    await callback.answer()
+        title = _escape(task.get("title"))
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="📝 Змінити назву", callback_data=f"edit_title_{task_id}")],
+            [types.InlineKeyboardButton(text="📅 Змінити дату", callback_data=f"edit_date_{task_id}")],
+            [types.InlineKeyboardButton(text="⭐ Змінити пріоритет", callback_data=f"edit_priority_{task_id}")],
+            [types.InlineKeyboardButton(text="↩️ Назад", callback_data="back_to_list")],
+        ])
+        
+        await callback.message.edit_text(
+            f"✏️ <b>Редагування завдання:</b>\n\n📝 {title}\n\nОберіть, що змінити:",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Помилка в open_edit_menu: {e}", exc_info=True)
+        await callback.answer("Сталася помилка.", show_alert=True)
 
 @router.callback_query(F.data == "back_to_list")
 async def back_to_list(callback: types.CallbackQuery):
@@ -1013,41 +1017,59 @@ async def start_edit_title(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(EditState.waiting_for_new_title)
 async def process_new_title(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    task_id = data.get("edit_task_id")
-    user_id = await user_repository.get_user_id_by_telegram_id(message.from_user.id)
-    
-    new_title = message.text.strip()
-    await task_repository.update_task(task_id, user_id, title=new_title)
-    
-    await state.clear()
-    await message.answer(f"✅ Назву змінено на: <b>{_escape(new_title)}</b>", parse_mode="HTML")
+    try:
+        data = await state.get_data()
+        task_id = data.get("edit_task_id")
+        user_id = await user_repository.get_user_id_by_telegram_id(message.from_user.id)
+        
+        if not task_id or not user_id:
+            await message.answer("❌ Помилка: не вдалося знайти завдання.")
+            await state.clear()
+            return
+
+        new_title = message.text.strip()
+        success = await task_repository.update_task(task_id, user_id, title=new_title)
+        
+        if success:
+            await message.answer(f"✅ Назву змінено на: <b>{_escape(new_title)}</b>", parse_mode="HTML")
+        else:
+            await message.answer("❌ Не вдалося оновити завдання в базі.")
+        await state.clear()
+    except Exception as e:
+        logger.error(f"Помилка при зміні назви: {e}", exc_info=True)
+        await message.answer("❌ Сталася помилка. Спробуйте ще раз.")
+        await state.clear()
 
 @router.callback_query(F.data.startswith("edit_date_"))
 async def start_edit_date(callback: types.CallbackQuery, state: FSMContext):
     task_id = int(callback.data.split("_")[-1])
     await state.update_data(edit_task_id=task_id)
-    await callback.message.edit_text(
-        "Введіть <b>нову дату</b> у форматі ДД.ММ.РРРР\n(наприклад, 25.10.2026):", 
-        parse_mode="HTML"
-    )
+    await callback.message.edit_text("Введіть <b>нову дату</b> у форматі ДД.ММ.РРРР:", parse_mode="HTML")
     await callback.answer()
     await state.set_state(EditState.waiting_for_new_date)
 
 @router.message(EditState.waiting_for_new_date)
 async def process_new_date(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    task_id = data.get("edit_task_id")
-    user_id = await user_repository.get_user_id_by_telegram_id(message.from_user.id)
-    
-    new_date = _parse_user_date(message.text.strip())
-    if not new_date:
-        await message.answer("❌ Невірний формат. Спробуйте ще раз (ДД.ММ.РРРР):")
-        return
+    try:
+        data = await state.get_data()
+        task_id = data.get("edit_task_id")
+        user_id = await user_repository.get_user_id_by_telegram_id(message.from_user.id)
         
-    await task_repository.update_task(task_id, user_id, due_date=new_date, due_at=None)
-    await state.clear()
-    await message.answer(f"✅ Дату змінено на: <b>{new_date}</b>", parse_mode="HTML")
+        new_date = _parse_user_date(message.text.strip())
+        if not new_date:
+            await message.answer("❌ Невірний формат. Спробуйте ще раз (ДД.ММ.РРРР):")
+            return
+            
+        success = await task_repository.update_task(task_id, user_id, due_date=new_date, due_at=None)
+        if success:
+            await message.answer(f"✅ Дату змінено на: <b>{new_date}</b>", parse_mode="HTML")
+        else:
+            await message.answer("❌ Не вдалося оновити дату.")
+        await state.clear()
+    except Exception as e:
+        logger.error(f"Помилка при зміні дати: {e}", exc_info=True)
+        await message.answer("❌ Сталася помилка. Спробуйте ще раз.")
+        await state.clear()
 
 @router.callback_query(F.data.startswith("edit_priority_"))
 async def edit_priority_inline(callback: types.CallbackQuery, state: FSMContext):
@@ -1064,16 +1086,24 @@ async def edit_priority_inline(callback: types.CallbackQuery, state: FSMContext)
 
 @router.callback_query(F.data.startswith("set_priority_"))
 async def process_new_priority(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    task_id = data.get("edit_task_id")
-    user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
-    
-    new_priority = callback.data.split("_")[-1]
-    await task_repository.update_task(task_id, user_id, priority=new_priority)
-    
-    await state.clear()
-    await callback.message.edit_text("✅ Пріоритет успішно змінено.", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[]))
-    await callback.answer("Пріоритет оновлено!")
+    try:
+        data = await state.get_data()
+        task_id = data.get("edit_task_id")
+        user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
+        
+        new_priority = callback.data.split("_")[-1]
+        success = await task_repository.update_task(task_id, user_id, priority=new_priority)
+        
+        if success:
+            await callback.message.edit_text("✅ Пріоритет успішно змінено.", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[]))
+            await callback.answer("Пріоритет оновлено!")
+        else:
+            await callback.answer("Не вдалося оновити пріоритет.", show_alert=True)
+        await state.clear()
+    except Exception as e:
+        logger.error(f"Помилка при зміні пріоритету: {e}", exc_info=True)
+        await callback.answer("Сталася помилка.", show_alert=True)
+        await state.clear()
 
 
 # =============================================================================
