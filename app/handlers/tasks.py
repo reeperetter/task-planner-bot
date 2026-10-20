@@ -207,27 +207,23 @@ def _format_due(task: dict) -> str:
 
 
 def _format_task_line(task: dict, index: int = 0) -> str:
-    """
-    Форматування одного завдання для списку з нумерацією.
-    Формат:
-        1. <b>назва</b> 🔁
-           дата 🟡 👤
-    """
+    """Форматування одного завдання для списку з нумерацією."""
     priority = PRIORITY_EMOJI.get(task.get("priority", "normal"), "🟡")
     category = "💼" if task.get("category") == "work" else "👤"
 
     title = _escape(task.get("title") or "Без назви")
     due = _format_due(task)
     
+    # Значок повторення йде ОСТАННІМ у рядку з датою та іконками
     recurrence_mark = " 🔁" if task.get("recurrence_rule_id") else ""
     
-    # Дата та іконки на одному рядку
-    date_and_meta = f"{due} {priority} {category}"
+    # Формат: дата пріоритет категорія повторення
+    date_and_meta = f"{due} {priority} {category}{recurrence_mark}"
     
     if index > 0:
-        return f"{index}. <b>{title}</b>{recurrence_mark}\n   {date_and_meta}"
+        return f"{index}. <b>{title}</b>\n   {date_and_meta}"
     else:
-        return f"<b>{title}</b>{recurrence_mark}\n   {date_and_meta}"
+        return f"<b>{title}</b>\n   {date_and_meta}"
 
 
 async def _send_tasks_list(
