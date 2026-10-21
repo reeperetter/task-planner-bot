@@ -79,14 +79,6 @@ MENU_TEXTS = {
 }
 
 CANCEL_TEXT = "❌ Скасувати"
-MAX_MESSAGE_LENGTH = 3500
-
-# Клавіатура з кнопкою "Скасувати" для використання в станах очікування
-def _cancel_keyboard() -> types.ReplyKeyboardMarkup:
-    return types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text=CANCEL_TEXT)]],
-        resize_keyboard=True
-    )
 
 HELP_TEXT = (
     "❓ <b>Допомога користувачу</b>\n\n"
@@ -222,8 +214,8 @@ def _format_due(task: dict) -> str:
     return "без строку"
 
 
-def _format_task_line(task: dict, index: int = 0) -> str:
-    """Форматування одного завдання для списку з нумерацією."""
+def _format_task_line(task: dict) -> str:
+    """Форматування одного завдання."""
     priority = PRIORITY_EMOJI.get(task.get("priority", "normal"), "🟡")
     category = "💼" if task.get("category") == "work" else "👤"
     title = _escape(task.get("title") or "Без назви")
@@ -232,101 +224,93 @@ def _format_task_line(task: dict, index: int = 0) -> str:
     recurrence_mark = " 🔁" if task.get("recurrence_rule_id") else ""
     date_and_meta = f"{due} {priority} {category}{recurrence_mark}"
     
-    if index > 0:
-        return f"{index}. <b>{title}</b>\n   {date_and_meta}"
-    else:
-        return f"<b>{title}</b>\n   {date_and_meta}"
+    return f"<b>{title}</b>\n{date_and_meta}"
 
 
 async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict], category: Optional[str] = None, priority: Optional[str] = None) -> None:
+    """Надсилає кожне завдання окремим повідомленням з кнопками."""
+    
+    message_ids = []
+    
+    # Заголовок списку
+    filter_note = ""
+    if category:
+        filter_note += f"\n👤 Категорія: {_escape(CATEGORY_LABEL.get(category, category))}"
+    if priority:
+        filter_note += f"\n⭐ Пріоритет: {_escape(PRIORITY_LABEL.get(priority, priority))}"
+    
+    header_msg = await message.answer(
+        f"<b>{_escape(title)}</b> ({len(tasks)}){filter_note}",
+        parse_mode="HTML"
+    )
+    message_ids.append(header_msg.message_id)
+    
     if not tasks:
-        await message.answer(f"<b>{_escape(title)}</b>\n\n📭 Завдань не знайдено.", parse_mode="HTML")
-        return
-
-    chunks: list[list[dict]] = []
-    current: list[dict] = []
-    current_size = len(title) + 20
-
-    for task in tasks:
-        line_size = len(_format_task_line(task, 1)) + 2
-        if current and current_size + line_size > MAX_MESSAGE_LENGTH:
-            chunks.append(current)
-            current = []
-            current_size = len(title) + 20
-        current.append(task)
-        current_size += line_size
-
-    if current:
-        chunks.append(current)
-
-    global_index = 0
-    for index, chunk in enumerate(chunks, start=1):
-        if len(chunks) == 1:
-            header = f"<b>{_escape(title)}</b> ({len(tasks)})"
-        else:
-            header = f"<b>{_escape(title)}</b>\nЧастина {index}/{len(chunks)} · усього {len(tasks)}"
-
-        body_parts = []
-        for task in chunk:
-            global_index += 1
-            body_parts.append(_format_task_line(task, global_index))
-        body = "\n\n".join(body_parts)
-
-        buttons = []
-        for task in chunk:
+        empty_msg = await message.answer("📭 Завдань не знайдено.")
+        message_ids.append(empty_msg.message_id)
+    else:
+        # Кожне завдання — окреме повідомлення
+        for task in tasks:
+            task_text = _format_task_line(task)
             task_id = task['id']
-            label = (task.get("title") or "Завдання").replace("\n", " ")[:22]
-            buttons.append([
-                types.InlineKeyboardButton(text="✏️", callback_data=f"edit_menu_{task_id}"),
-                types.InlineKeyboardButton(text=f"🗑️ {label}", callback_data=f"delete_{task_id}"),
+            
+            # Кнопки ✏️ та 🗑️ без тексту
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    types.InlineKeyboardButton(text="✏️", callback_data=f"edit_menu_{task_id}"),
+                    types.InlineKeyboardButton(text="🗑️", callback_data=f"delete_{task_id}"),
+                ]
             ])
-
-        # === РОЗДІЛЮВАЧ МІЖ ЗАВДАННЯМИ ТА ФІЛЬТРАМИ ===
-        buttons.append([types.InlineKeyboardButton(text="━" * 20, callback_data="ignore")])
-        buttons.append([types.InlineKeyboardButton(text="🎛️ Фільтри", callback_data="ignore")])
-        
-        # Кнопки категорії
-        filter_buttons = []
-        if category == "personal":
-            filter_buttons.append(types.InlineKeyboardButton(text="✅ 👤 Особисті", callback_data="filter_reset"))
-        else:
-            filter_buttons.append(types.InlineKeyboardButton(text="👤 Особисті", callback_data="filter_category_personal"))
             
-        if category == "work":
-            filter_buttons.append(types.InlineKeyboardButton(text="✅ 💼 Робочі", callback_data="filter_reset"))
-        else:
-            filter_buttons.append(types.InlineKeyboardButton(text="💼 Робочі", callback_data="filter_category_work"))
-        
-        buttons.append(filter_buttons)
-        
-        # Кнопки пріоритету
-        priority_buttons = []
-        if priority == "high":
-            priority_buttons.append(types.InlineKeyboardButton(text="✅ 🔴 Високий", callback_data="filter_reset"))
-        else:
-            priority_buttons.append(types.InlineKeyboardButton(text="🔴 Високий", callback_data="filter_priority_high"))
-            
-        if priority == "normal":
-            priority_buttons.append(types.InlineKeyboardButton(text="✅ 🟡 Звичайний", callback_data="filter_reset"))
-        else:
-            priority_buttons.append(types.InlineKeyboardButton(text="🟡 Звичайний", callback_data="filter_priority_normal"))
-            
-        if priority == "low":
-            priority_buttons.append(types.InlineKeyboardButton(text="✅ 🔵 Низький", callback_data="filter_reset"))
-        else:
-            priority_buttons.append(types.InlineKeyboardButton(text="🔵 Низький", callback_data="filter_priority_low"))
-        
-        buttons.append(priority_buttons)
-        
-        # Кнопка скинути фільтри (якщо є активні фільтри)
-        if category or priority:
-            buttons.append([types.InlineKeyboardButton(text="🔄 Скинути фільтри", callback_data="filter_reset")])
-
-        await message.answer(
-            f"{header}\n\n{body}",
-            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None,
-            parse_mode="HTML",
+            task_msg = await message.answer(task_text, reply_markup=keyboard, parse_mode="HTML")
+            message_ids.append(task_msg.message_id)
+    
+    # Фільтри — окреме повідомлення
+    filter_buttons = []
+    
+    # Категорії
+    category_row = []
+    for value, label in (("personal", "👤 Особисті"), ("work", "💼 Робочі")):
+        mark = " ✅" if category == value else ""
+        category_row.append(
+            types.InlineKeyboardButton(
+                text=f"{label}{mark}",
+                callback_data=f"filter_category_{value}",
+            )
         )
+    filter_buttons.append(category_row)
+    
+    # Пріоритети
+    priority_row = []
+    for value, label in (
+        ("high", "🔴 Високий"),
+        ("normal", "🟡 Звичайний"),
+        ("low", "🔵 Низький"),
+    ):
+        mark = " ✅" if priority == value else ""
+        priority_row.append(
+            types.InlineKeyboardButton(
+                text=f"{label}{mark}",
+                callback_data=f"filter_priority_{value}",
+            )
+        )
+    filter_buttons.append(priority_row)
+    
+    # Скинути фільтри
+    if category or priority:
+        filter_buttons.append([
+            types.InlineKeyboardButton(text="🔄 Скинути фільтри", callback_data="filter_reset")
+        ])
+    
+    filter_msg = await message.answer(
+        "🎛️ <b>ФІЛЬТРИ</b>",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=filter_buttons),
+        parse_mode="HTML"
+    )
+    message_ids.append(filter_msg.message_id)
+    
+    # Зберігаємо ID всіх повідомлень у стані
+    await message.bot.data.setdefault("list_messages", {})[message.chat.id] = message_ids
 
 
 async def _show_task_list(message: types.Message, state: FSMContext, title: str, fetch_func, category: Optional[str] = None, priority: Optional[str] = None) -> None:
@@ -447,11 +431,7 @@ def _is_control_text(text: str) -> bool:
 @router.message(F.text == "➕ Додати завдання")
 async def cmd_add_task(message: types.Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer(
-        "✍️ <b>Створення завдання</b>\n\nВведіть назву завдання:",
-        parse_mode="HTML",
-        reply_markup=_cancel_keyboard()
-    )
+    await message.answer("✍️ <b>Створення завдання</b>\n\nВведіть назву завдання:", parse_mode="HTML")
     await state.set_state(TaskCreation.waiting_for_title)
 
 
@@ -668,14 +648,7 @@ async def change_date(callback: types.CallbackQuery, state: FSMContext) -> None:
     if not data.get("title"):
         await callback.answer("Немає активного завдання.", show_alert=True)
         return
-    await callback.message.edit_text(
-        "📅 <b>Введіть нову дату у форматі ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>",
-        parse_mode="HTML"
-    )
-    await callback.message.answer(
-        "Або натисніть «❌ Скасувати» нижче.",
-        reply_markup=_cancel_keyboard()
-    )
+    await callback.message.edit_text("📅 <b>Введіть нову дату у форматі ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>", parse_mode="HTML")
     await callback.answer()
     await state.set_state(TaskCreation.waiting_for_date_change)
 
@@ -693,11 +666,7 @@ async def cancel_task_creation(callback: types.CallbackQuery, state: FSMContext)
 @router.message(F.text == "🔍 Пошук")
 async def cmd_search(message: types.Message, state: FSMContext) -> None:
     await state.set_state(SearchState.waiting_for_query)
-    await message.answer(
-        "🔎 <b>Пошук завдань</b>\n\nВведіть слово або фразу для пошуку в назві завдань:",
-        parse_mode="HTML",
-        reply_markup=_cancel_keyboard()
-    )
+    await message.answer("🔎 <b>Пошук завдань</b>\n\nВведіть слово або фразу для пошуку в назві завдань:", parse_mode="HTML")
 
 @router.message(SearchState.waiting_for_query)
 async def process_search(message: types.Message, state: FSMContext) -> None:
@@ -742,7 +711,6 @@ async def open_edit_menu(callback: types.CallbackQuery) -> None:
 async def cancel_edit(callback: types.CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.message.delete()
-    await callback.message.answer("❌ Редагування скасовано.", reply_markup=get_main_menu_keyboard())
     await callback.answer()
 
 @router.callback_query(F.data == "back_to_list")
@@ -755,10 +723,6 @@ async def start_edit_title(callback: types.CallbackQuery, state: FSMContext) -> 
     task_id = int(callback.data.split("_")[-1])
     await state.update_data(edit_task_id=task_id)
     await callback.message.edit_text("Введіть <b>нову назву</b> завдання:", parse_mode="HTML")
-    await callback.message.answer(
-        "Або натисніть «❌ Скасувати» нижче.",
-        reply_markup=_cancel_keyboard()
-    )
     await callback.answer()
     await state.set_state(EditState.waiting_for_new_title)
 
@@ -789,10 +753,6 @@ async def start_edit_date(callback: types.CallbackQuery, state: FSMContext) -> N
     task_id = int(callback.data.split("_")[-1])
     await state.update_data(edit_task_id=task_id)
     await callback.message.edit_text("Введіть <b>нову дату</b> у форматі ДД.ММ.РРРР:", parse_mode="HTML")
-    await callback.message.answer(
-        "Або натисніть «❌ Скасувати» нижче.",
-        reply_markup=_cancel_keyboard()
-    )
     await callback.answer()
     await state.set_state(EditState.waiting_for_new_date)
 
@@ -940,15 +900,9 @@ async def filter_reset(callback: types.CallbackQuery, state: FSMContext) -> None
     await _apply_filter(callback, state, category=None, priority=None)
 
 async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, category: Optional[str] = None, priority: Optional[str] = None) -> None:
-    logger.info(f"🔧 Виклик _apply_filter: category={category}, priority={priority}")
-    
     data = await state.get_data()
-    logger.info(f"🔧 Дані стану: {data}")
-    
     list_func_name = data.get("current_list_func")
     title = data.get("current_list_title", "Завдання")
-    
-    logger.info(f"🔧 list_func_name={list_func_name}, title={title}")
     
     func_map = {
         "get_tasks_today": task_service.get_tasks_today_filtered,
@@ -961,7 +915,6 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
     
     fetch_func = func_map.get(list_func_name)
     if not fetch_func:
-        logger.error(f"🔧 Функція не знайдена в func_map: {list_func_name}")
         await callback.answer("Помилка: не вдалося визначити тип списку.", show_alert=True)
         return
     
@@ -971,30 +924,31 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
         return
     
     try:
-        logger.info(f"🔧 Виклик {list_func_name}_filtered з user_id={user_id}, category={category}, priority={priority}")
         tasks = await fetch_func(user_id, category, priority)
-        logger.info(f"🔧 Отримано {len(tasks)} завдань")
     except Exception as e:
-        logger.exception(f"🔧 Помилка отримання завдань з фільтрами: {e}")
+        logger.exception(f"Помилка отримання завдань з фільтрами: {e}")
         await callback.answer("⚠️ Не вдалося отримати завдання.", show_alert=True)
         return
     
     await state.update_data(current_category=category, current_priority=priority)
     
+    # Видаляємо всі старі повідомлення списку
     try:
-        await callback.message.delete()
-        logger.info("🔧 Старе повідомлення видалено")
+        message_ids = callback.bot.data.get("list_messages", {}).get(callback.message.chat.id, [])
+        for msg_id in message_ids:
+            try:
+                await callback.bot.delete_message(callback.message.chat.id, msg_id)
+            except Exception:
+                pass
     except Exception as e:
-        logger.warning(f"🔧 Не вдалося видалити повідомлення: {e}")
+        logger.warning(f"Не вдалося видалити старі повідомлення: {e}")
     
     await _send_tasks_list(callback.message, title, tasks, category, priority)
-    logger.info("🔧 Нове повідомлення відправлено")
     await callback.answer()
 
 
 @router.callback_query()
 async def unknown_callback(callback: types.CallbackQuery) -> None:
-    logger.error(f"🚨 ПЕРЕХОПЛЕНА КНОПКА! callback_data = '{callback.data}'")
     await callback.answer()
 
 
@@ -1029,22 +983,14 @@ async def process_category(message: types.Message, state: FSMContext) -> None:
 async def process_priority(message: types.Message, state: FSMContext) -> None:
     priority = PRIORITY_FROM_BUTTON.get(message.text, "normal")
     await state.update_data(priority=priority)
-    await message.answer(
-        "📅 Введіть дату виконання у форматі <b>ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>",
-        reply_markup=_cancel_keyboard(),
-        parse_mode="HTML"
-    )
+    await message.answer("📅 Введіть дату виконання у форматі <b>ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>", parse_mode="HTML")
     await state.set_state(TaskCreation.waiting_for_due_date)
 
 @router.message(TaskCreation.waiting_for_due_date)
 async def process_due_date(message: types.Message, state: FSMContext) -> None:
     due_date = _parse_user_date(message.text or "")
     if not due_date:
-        await message.answer(
-            "❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.",
-            reply_markup=_cancel_keyboard(),
-            parse_mode="HTML"
-        )
+        await message.answer("❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.", parse_mode="HTML")
         return
     await state.update_data(due_date=due_date)
     await _send_preview(message, state)
@@ -1053,11 +999,7 @@ async def process_due_date(message: types.Message, state: FSMContext) -> None:
 async def process_date_input(message: types.Message, state: FSMContext) -> None:
     due_date = _parse_user_date(message.text or "")
     if not due_date:
-        await message.answer(
-            "❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.",
-            reply_markup=_cancel_keyboard(),
-            parse_mode="HTML"
-        )
+        await message.answer("❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.", parse_mode="HTML")
         return
     await state.update_data(due_date=due_date)
     await _send_preview(message, state)
@@ -1066,11 +1008,7 @@ async def process_date_input(message: types.Message, state: FSMContext) -> None:
 async def process_date_change(message: types.Message, state: FSMContext) -> None:
     due_date = _parse_user_date(message.text or "")
     if not due_date:
-        await message.answer(
-            "❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.",
-            reply_markup=_cancel_keyboard(),
-            parse_mode="HTML"
-        )
+        await message.answer("❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.", parse_mode="HTML")
         return
     await state.update_data(due_date=due_date, due_at=None)
     await _send_preview(message, state)
@@ -1140,7 +1078,6 @@ async def handle_natural_language_task(message: types.Message, state: FSMContext
         else:
             await message.answer(
                 "📅 Вкажіть дату виконання у форматі <b>ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>",
-                reply_markup=_cancel_keyboard(),
                 parse_mode="HTML"
             )
             await state.set_state(TaskCreation.waiting_for_date_input)
