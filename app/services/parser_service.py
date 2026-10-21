@@ -99,21 +99,19 @@ def parse_natural_language(text: str) -> dict:
                 text = re.sub(r'\b' + word + r'\b', '', text, flags=re.IGNORECASE).strip()
                 break
 
-    # 4. ПЕРЕВІРКА ЧАСУ (наприклад, "о 10:00", "в 15:30", "18:00")
-    # Використовуємо безпечні локальні змінні hour та minute замість parsed_hour
-    time_match = re.search(r'(?:о|в|об|о\s+)?\s*(\d{1,2}):(\d{2})\b', text, re.IGNORECASE)
+    # 4. ПЕРЕВІРКА ЧАСУ (наприклад, "на 12:20", "о 10:00", "в 15:30")
+    time_match = re.search(r'(?:на|о|в|об|около|о\s+)\s*(\d{1,2}):(\d{2})\b', text, re.IGNORECASE)
     if time_match:
         hour = int(time_match.group(1))
         minute = int(time_match.group(2))
         
         if 0 <= hour <= 23 and 0 <= minute <= 59:
-            # Якщо дата вже є, використовуємо її, інакше сьогодні
             base_date = result.get("due_date") or date.today().isoformat()
             result["due_at"] = f"{base_date}T{hour:02d}:{minute:02d}:00"
             logger.info(f"✅ Знайдено час: {hour:02d}:{minute:02d}, встановлено due_at: {result['due_at']}")
             
-            # Видаляємо час з тексту назви
-            text = re.sub(r'(?:о|в|об|о\s+)?\s*\d{1,2}:\d{2}\b', '', text, flags=re.IGNORECASE).strip()
+            # Видаляємо час І прийменник перед ним з тексту назви
+            text = re.sub(r'(?:на|о|в|об|около|о\s+)\s*\d{1,2}:\d{2}\b', '', text, flags=re.IGNORECASE).strip()
         else:
             logger.warning(f"⚠️ Невірний час: {hour}:{minute}")
 

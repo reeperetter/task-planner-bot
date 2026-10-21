@@ -187,23 +187,28 @@ def _normalize_date(value: str | None) -> str | None:
 
 
 def _format_due(task: dict) -> str:
-    """Форматування дати/часу завдання."""
     raw_at = task.get("due_at")
     raw_date = task.get("due_date")
 
     if raw_at:
         try:
-            dt = datetime.fromisoformat(raw_at)
+            if isinstance(raw_at, str):
+                dt = datetime.fromisoformat(raw_at)
+            else:
+                dt = raw_at
             return dt.strftime('%d.%m.%Y о %H:%M')
-        except (ValueError, TypeError):
-            return _escape(raw_at)
+        except (ValueError, TypeError, AttributeError):
+            return str(raw_at)
 
     if raw_date:
         try:
-            d = datetime.strptime(raw_date, "%Y-%m-%d").date()
+            if isinstance(raw_date, str):
+                d = datetime.strptime(raw_date, "%Y-%m-%d").date()
+            else:
+                d = raw_date
             return d.strftime('%d.%m.%Y')
-        except (ValueError, TypeError):
-            return _escape(raw_date)
+        except (ValueError, TypeError, AttributeError):
+            return str(raw_date)
 
     return "без строку"
 
@@ -489,10 +494,22 @@ async def show_help(message: types.Message, state: FSMContext) -> None:
 
 
 @router.message(Command("cancel"))
-@router.message(F.text == CANCEL_TEXT)
+@router.message(F.text == "❌ Скасувати")
 async def cancel_operation(message: types.Message, state: FSMContext) -> None:
-    await state.clear()
-    await message.answer("❌ Операцію скасовано.\n\nОберіть дію:", reply_markup=get_main_menu_keyboard())
+    # Отримуємо поточний стан, щоб дати зрозумілу відповідь
+    current_state = await state.get_state()
+    await state.clear() # Повне очищення стану
+    
+    if current_state:
+        await message.answer(
+            "❌ Операцію скасовано. Стан очищено.\n\nОберіть дію з меню:", 
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await message.answer(
+            "ℹ️ Активних операцій немає.\n\nОберіть дію з меню:", 
+            reply_markup=get_main_menu_keyboard()
+        )
 
 
 # =============================================================================

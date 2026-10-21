@@ -185,38 +185,40 @@ async def get_tasks_without_due_date(user_id: int) -> List[Dict[str, Any]]:
 
 
 async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
-    """Оновити завдання."""
-    logger.info(f"🔧 Виклик update_task: task_id={task_id}, user_id={user_id}, kwargs={kwargs}")
-    
+    """Оновити завдання з явним приведенням типів для PostgreSQL."""
     if not kwargs:
         return False
     
     allowed_fields = {'title', 'category', 'status', 'priority', 'due_at', 'due_date', 'recurrence_rule_id', 'completed_at'}
     update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
     
-    # Конвертація рядків у об'єкти дат для asyncpg
-    if 'due_at' in update_fields and isinstance(update_fields['due_at'], str):
-        update_fields['due_at'] = datetime.fromisoformat(update_fields['due_at'])
-    if 'due_date' in update_fields and isinstance(update_fields['due_date'], str):
-        update_fields['due_date'] = date.fromisoformat(update_fields['due_date'])
-    if 'completed_at' in update_fields and isinstance(update_fields['completed_at'], str):
-        update_fields['completed_at'] = datetime.fromisoformat(update_fields['completed_at'])
-        
     if not update_fields:
         logger.warning(f"⚠️ Спроба оновити недозволені поля: {kwargs.keys()}")
         return False
     
-    set_clause = ", ".join(f"{k} = ${i+3}" for i, k in enumerate(update_fields.keys()))
+    # Формуємо SET clause з ЯВНИМ приведенням типів для дат
+    set_parts = []
+    for i, k in enumerate(update_fields.keys()):
+        if k in ('due_at', 'completed_at'):
+            set_parts.append(f"{k} = ${i+3}::timestamp")
+        elif k == 'due_date':
+            set_parts.append(f"{k} = ${i+3}::date")
+        else:
+            set_parts.append(f"{k} = ${i+3}")
+    
+    set_clause = ", ".join(set_parts)
     values = list(update_fields.values()) + [task_id, user_id]
     
-    query = f"UPDATE tasks SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ${len(values)-1} AND user_id = ${len(values)}"
-    logger.info(f"🔧 SQL запит: {query}")
-    logger.info(f"🔧 Параметри: {values}")
+    query = f"""
+        UPDATE tasks 
+        SET {set_clause}, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = ${len(values)-1} AND user_id = ${len(values)}
+    """
     
     async with get_connection() as conn:
         try:
             status = await conn.execute(query, *values)
-            logger.info(f"🔧 Результат UPDATE з БД: {status}")
+            logger.info(f"✅ Оновлення завдання {task_id} успішне: {status}")
             return "UPDATE 1" in status
         except Exception as e:
             logger.error(f"🔧 КРИТИЧНА ПОМИЛКА SQL при оновленні: {e}", exc_info=True)
