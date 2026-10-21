@@ -1019,26 +1019,49 @@ async def confirming_guard(message: types.Message, state: FSMContext) -> None:
 # 4. ПРИРОДНА МОВА
 # =============================================================================
 
-@router.message(F.text, StateFilter(None))
+@router.message(F.text)  # Тимчасово прибрали StateFilter(None) для діагностики
 async def handle_natural_language_task(message: types.Message, state: FSMContext) -> None:
+    # 1. Дізнаємося поточний стан FSM
+    current_state = await state.get_state()
+    logger.info(f"🔍 Вхідний текст: '{message.text}' | Поточний стан FSM: {current_state}")
+
     text = (message.text or "").strip()
+    
+    # 2. Перевіряємо, чи це не службова команда
     if not text or _is_control_text(text):
+        logger.info(f"⏭️ Ігноруємо контрольний текст або порожнє повідомлення: '{text}'")
         return
 
-    logger.info("Природна мова від %s: '%s'", message.from_user.id, text)
+    # 3. Якщо користувач у стані очікування дати під час створення, обробляємо це окремо
+    if current_state == "TaskCreation:waiting_for_date_input" or current_state == "TaskCreation:waiting_for_date_change":
+        logger.info("📅 Перенаправлення в обробник дати FSM")
+        return  # Дозволяємо спрацювати специфічним хендлерам FSM, які стоять вище
 
+    # 4. Запускаємо парсер
     try:
+        logger.info(f"🧠 Запуск парсера для тексту: '{text}'")
         parsed = parse_natural_language(text)
-    except Exception:
-        logger.exception("Помилка парсера природної мови")
-        await message.answer("⚠️ Не вдалося розпізнати завдання. Спробуйте написати простіше, наприклад:\n<code>20.10.2026 купити молоко</code>", parse_mode="HTML")
+        logger.info(f"🧠 Результат парсингу: {parsed}")
+    except Exception as e:
+        logger.exception(f"💥 Критична помилка парсера: {e}")
+        await message.answer("⚠️ Сталася помилка при розпізнаванні. Спробуйте ще раз.")
         return
 
+    # 5. Перевіряємо результат
     title = (parsed.get("title") or "").strip()
+    logger.info(f"📝 Витягнутий заголовок: '{title}'")
+
     if not title or title == "Нове завдання":
-        await message.answer("🤔 Я не розпізнав назву завдання.\n\nНапишіть, наприклад:\n<code>20.10.2026 купити молоко</code>\nабо натисніть «➕ Додати завдання».", parse_mode="HTML")
+        await message.answer(
+            "⚠️ Не вдалося розпізнати назву завдання.\n\n"
+            "Напишіть, наприклад:\n"
+            "<code>20.10.2026 купити молоко</code>\n"
+            "або натисніть «➕ Додати завдання».",
+            parse_mode="HTML"
+        )
         return
 
+    # 6. Якщо все гаразд, зберігаємо дані
     await state.update_data(
         title=title,
         category=parsed.get("category", "personal"),
@@ -1055,12 +1078,15 @@ async def handle_natural_language_task(message: types.Message, state: FSMContext
     if not due_date and not due_at:
         if recurrence:
             today = date.today().isoformat()
-            logger.info(f"Для повторюваного завдання встановлено базову дату: {today}")
+            logger.info(f"🔁 Для повторюваного завдання встановлено базову дату: {today}")
             await state.update_data(due_date=today)
             await _send_preview(message, state)
             return
         else:
-            await message.answer("📅 Вкажіть дату виконання у форматі <b>ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>", parse_mode="HTML")
+            await message.answer(
+                "📅 Вкажіть дату виконання у форматі <b>ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>", 
+                parse_mode="HTML"
+            )
             await state.set_state(TaskCreation.waiting_for_date_input)
             return
 
