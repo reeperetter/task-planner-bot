@@ -72,9 +72,12 @@ def parse_natural_language(text: str) -> dict:
         except ValueError:
             logger.warning("⚠️ Невірний формат абсолютної дати")
 
-    # 3. ПЕРЕВІРКА ВІДНОСНОЇ ДАТИ
+    # 3. ПЕРЕВІРКА ВІДНОСНОЇ ДАТИ (ВИПРАВЛЕНО: сортуємо за довжиною)
     if not result["due_date"]:
-        for word, days_offset in RELATIVE_DATES.items():
+        # Сортуємо ключі за довжиною (найдовші спочатку), щоб "післязавтра" перевірялося перед "завтра"
+        sorted_words = sorted(RELATIVE_DATES.keys(), key=len, reverse=True)
+        for word in sorted_words:
+            days_offset = RELATIVE_DATES[word]
             if word in text_lower:
                 target_date = date.today() + timedelta(days=days_offset)
                 result["due_date"] = target_date.isoformat()
@@ -82,7 +85,7 @@ def parse_natural_language(text: str) -> dict:
                 text = re.sub(r'\b' + word + r'\b', '', text, flags=re.IGNORECASE).strip()
                 break
 
-    # 4. ПЕРЕВІРКА ЧАСУ (ВИПРАВЛЕНО: додано "на" та покращено регулярку)
+    # 4. ПЕРЕВІРКА ЧАСУ
     time_match = re.search(r'(?:^|\s)(?:на|о|в|об|около)\s+(\d{1,2}):(\d{2})(?:\s|$)', text, re.IGNORECASE)
     if time_match:
         hour = int(time_match.group(1))
@@ -93,7 +96,6 @@ def parse_natural_language(text: str) -> dict:
             result["due_at"] = f"{base_date}T{hour:02d}:{minute:02d}:00"
             logger.info(f"✅ Знайдено час: {hour:02d}:{minute:02d}, встановлено due_at: {result['due_at']}")
             
-            # Видаляємо час з прийменником
             text = re.sub(r'(?:^|\s)(?:на|о|в|об|около)\s+\d{1,2}:\d{2}(?:\s|$)', ' ', text, flags=re.IGNORECASE).strip()
         else:
             logger.warning(f"⚠️ Невірний час: {hour}:{minute}")
