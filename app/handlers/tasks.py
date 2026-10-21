@@ -859,12 +859,6 @@ async def ask_delete(callback: types.CallbackQuery) -> None:
     )
     await callback.answer()
 
-@router.callback_query()
-async def unknown_callback(callback: types.CallbackQuery) -> None:
-    if callback.data != "ignore":
-        logger.debug("Невідомий callback: %s", callback.data)
-    await callback.answer()
-
 
 # --- ФІЛЬТРИ ---
 
@@ -946,6 +940,14 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
     await _send_tasks_list(callback.message, title, tasks, category, priority)
     logger.info("🔧 Нове повідомлення відправлено")
     await callback.answer()
+
+
+@router.callback_query()
+async def unknown_callback(callback: types.CallbackQuery) -> None:
+    # Цей рядок гарантовано покаже в логах Render, що саме ви натиснули
+    logger.error(f"🚨 ПЕРЕХОПЛЕНА КНОПКА! callback_data = '{callback.data}'")
+    await callback.answer()
+
 
 # =============================================================================
 # 3. FSM: ПОКРОКОВЕ СТВОРЕННЯ
