@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import os
+import signal
+import sys
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher
@@ -27,11 +29,10 @@ async def handle_ping(request):
 
 
 async def start_web_server():
-    """Запускає веб-сервер, щоб Render бачив відкритий порт і не вбивав процес."""
+    """Запускає веб-сервер, щоб Render бачив відкритий порт."""
     app = web.Application()
     app.router.add_get('/', handle_ping)
     
-    # Render автоматично передає змінну PORT. Ми використовуємо 10000 як надійний фолбек.
     port = int(os.getenv("PORT", 10000))
     
     runner = web.AppRunner(app)
@@ -40,22 +41,18 @@ async def start_web_server():
     await site.start()
     logger.info(f"✅ Веб-сервер успішно запущено і тримає порт {port}")
     
-    # Цей рядок критично важливий для Render: він не дає функції завершитися
     await asyncio.Event().wait()
 
 
 async def main() -> None:
     logger.info("Ініціалізація бота...")
-    
     await run_migrations()
     logger.info("База даних ініціалізовано")
 
-    # ВИПРАВЛЕНО: новий синтаксис для aiogram 3.7.0+
     bot = Bot(
         token=config.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
-    
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(start.router)
@@ -63,14 +60,25 @@ async def main() -> None:
 
     logger.info("Бот успішно запущено у режимі polling.")
 
+    # ФУНКЦІЯ МИТТЄВОГО ВИМКНЕННЯ
+    def handle_sigterm():
+        logger.info("⚠️ Отримано сигнал завершення (SIGTERM). Миттєве вимкнення для уникнення конфлікту...")
+        # Закриваємо сесію бота, щоб Telegram одразу звільнив токен
+        asyncio.create_task(bot.session.close())
+        sys.exit(0)
+
+    # Реєструємо обробник сигналів від Render
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
+    loop.add_signal_handler(signal.SIGINT, handle_sigterm)
+
     try:
-        # Запускаємо обидва процеси паралельно і назавжди
         await asyncio.gather(
             dp.start_polling(bot),
             start_web_server()
         )
     except asyncio.CancelledError:
-        logger.info("Отримано сигнал завершення роботи")
+        logger.info("Роботу перервано")
     finally:
         await bot.session.close()
 
