@@ -5,6 +5,7 @@
 import logging
 from datetime import datetime, date
 from html import escape
+from typing import Optional
 
 from aiogram import F, Router, types
 from aiogram.filters import Command, StateFilter
@@ -43,6 +44,7 @@ class EditState(StatesGroup):
 class ListState(StatesGroup):
     showing_list = State()
 
+
 # =============================================================================
 # КОНСТАНТИ
 # =============================================================================
@@ -78,6 +80,13 @@ MENU_TEXTS = {
 
 CANCEL_TEXT = "❌ Скасувати"
 MAX_MESSAGE_LENGTH = 3500
+
+# Клавіатура з кнопкою "Скасувати" для використання в станах очікування
+def _cancel_keyboard() -> types.ReplyKeyboardMarkup:
+    return types.ReplyKeyboardMarkup(
+        keyboard=[[types.KeyboardButton(text=CANCEL_TEXT)]],
+        resize_keyboard=True
+    )
 
 HELP_TEXT = (
     "❓ <b>Допомога користувачу</b>\n\n"
@@ -220,7 +229,6 @@ def _format_task_line(task: dict, index: int = 0) -> str:
     title = _escape(task.get("title") or "Без назви")
     due = _format_due(task)
     
-    # Значок повторення йде ОСТАННІМ у рядку з датою та іконками
     recurrence_mark = " 🔁" if task.get("recurrence_rule_id") else ""
     date_and_meta = f"{due} {priority} {category}{recurrence_mark}"
     
@@ -264,7 +272,6 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
             body_parts.append(_format_task_line(task, global_index))
         body = "\n\n".join(body_parts)
 
-        # Кнопки завдань
         buttons = []
         for task in chunk:
             task_id = task['id']
@@ -274,10 +281,7 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
                 types.InlineKeyboardButton(text=f"🗑️ {label}", callback_data=f"delete_{task_id}"),
             ])
 
-        # Кнопки фільтрів (додаємо в кінці)
         filter_buttons = []
-        
-        # Кнопки категорії
         if category == "personal":
             filter_buttons.append(types.InlineKeyboardButton(text="✅ 👤 Особисті", callback_data="filter_reset"))
         else:
@@ -290,7 +294,6 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
         
         buttons.append(filter_buttons)
         
-        # Кнопки пріоритету
         priority_buttons = []
         if priority == "high":
             priority_buttons.append(types.InlineKeyboardButton(text="✅ 🔴 Високий", callback_data="filter_reset"))
@@ -309,7 +312,6 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
         
         buttons.append(priority_buttons)
         
-        # Кнопка скинути фільтри (якщо є активні фільтри)
         if category or priority:
             buttons.append([types.InlineKeyboardButton(text="🔄 Скинути фільтри", callback_data="filter_reset")])
 
@@ -327,7 +329,6 @@ async def _show_task_list(message: types.Message, state: FSMContext, title: str,
         return
 
     try:
-        # Викликаємо функцію з фільтрами, якщо вони є
         if category or priority:
             tasks = await fetch_func(user_id, category, priority)
         else:
@@ -337,7 +338,6 @@ async def _show_task_list(message: types.Message, state: FSMContext, title: str,
         await message.answer("⚠️ Не вдалося отримати список завдань. Спробуйте ще раз.")
         return
 
-    # Зберігаємо стан списку та фільтрів
     await state.update_data(
         current_list_title=title,
         current_list_func=fetch_func.__name__,
@@ -440,7 +440,11 @@ def _is_control_text(text: str) -> bool:
 @router.message(F.text == "➕ Додати завдання")
 async def cmd_add_task(message: types.Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer("✍️ <b>Створення завдання</b>\n\nВведіть назву завдання:", parse_mode="HTML")
+    await message.answer(
+        "✍️ <b>Створення завдання</b>\n\nВведіть назву завдання:",
+        parse_mode="HTML",
+        reply_markup=_cancel_keyboard()
+    )
     await state.set_state(TaskCreation.waiting_for_title)
 
 
@@ -496,9 +500,8 @@ async def show_help(message: types.Message, state: FSMContext) -> None:
 @router.message(Command("cancel"))
 @router.message(F.text == "❌ Скасувати")
 async def cancel_operation(message: types.Message, state: FSMContext) -> None:
-    # Отримуємо поточний стан, щоб дати зрозумілу відповідь
     current_state = await state.get_state()
-    await state.clear() # Повне очищення стану
+    await state.clear()
     
     if current_state:
         await message.answer(
@@ -658,7 +661,14 @@ async def change_date(callback: types.CallbackQuery, state: FSMContext) -> None:
     if not data.get("title"):
         await callback.answer("Немає активного завдання.", show_alert=True)
         return
-    await callback.message.edit_text("📅 <b>Введіть нову дату у форматі ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>", parse_mode="HTML")
+    await callback.message.edit_text(
+        "📅 <b>Введіть нову дату у форматі ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>",
+        parse_mode="HTML"
+    )
+    await callback.message.answer(
+        "Або натисніть «❌ Скасувати» нижче.",
+        reply_markup=_cancel_keyboard()
+    )
     await callback.answer()
     await state.set_state(TaskCreation.waiting_for_date_change)
 
@@ -676,7 +686,11 @@ async def cancel_task_creation(callback: types.CallbackQuery, state: FSMContext)
 @router.message(F.text == "🔍 Пошук")
 async def cmd_search(message: types.Message, state: FSMContext) -> None:
     await state.set_state(SearchState.waiting_for_query)
-    await message.answer("🔎 <b>Пошук завдань</b>\n\nВведіть слово або фразу для пошуку в назві завдань:", parse_mode="HTML")
+    await message.answer(
+        "🔎 <b>Пошук завдань</b>\n\nВведіть слово або фразу для пошуку в назві завдань:",
+        parse_mode="HTML",
+        reply_markup=_cancel_keyboard()
+    )
 
 @router.message(SearchState.waiting_for_query)
 async def process_search(message: types.Message, state: FSMContext) -> None:
@@ -705,8 +719,6 @@ async def open_edit_menu(callback: types.CallbackQuery) -> None:
             await callback.answer("Завдання не знайдено.", show_alert=True)
             return
         title = _escape(task.get("title"))
-        
-        # ДОДАНО КНОПКУ "❌ Скасувати"
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="📝 Змінити назву", callback_data=f"edit_title_{task_id}")],
             [types.InlineKeyboardButton(text="📅 Змінити дату", callback_data=f"edit_date_{task_id}")],
@@ -736,6 +748,10 @@ async def start_edit_title(callback: types.CallbackQuery, state: FSMContext) -> 
     task_id = int(callback.data.split("_")[-1])
     await state.update_data(edit_task_id=task_id)
     await callback.message.edit_text("Введіть <b>нову назву</b> завдання:", parse_mode="HTML")
+    await callback.message.answer(
+        "Або натисніть «❌ Скасувати» нижче.",
+        reply_markup=_cancel_keyboard()
+    )
     await callback.answer()
     await state.set_state(EditState.waiting_for_new_title)
 
@@ -766,6 +782,10 @@ async def start_edit_date(callback: types.CallbackQuery, state: FSMContext) -> N
     task_id = int(callback.data.split("_")[-1])
     await state.update_data(edit_task_id=task_id)
     await callback.message.edit_text("Введіть <b>нову дату</b> у форматі ДД.ММ.РРРР:", parse_mode="HTML")
+    await callback.message.answer(
+        "Або натисніть «❌ Скасувати» нижче.",
+        reply_markup=_cancel_keyboard()
+    )
     await callback.answer()
     await state.set_state(EditState.waiting_for_new_date)
 
@@ -923,7 +943,6 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
     
     logger.info(f"🔧 list_func_name={list_func_name}, title={title}")
     
-    # Мапінг імен функцій
     func_map = {
         "get_tasks_today": task_service.get_tasks_today_filtered,
         "get_tasks_tomorrow": task_service.get_tasks_tomorrow_filtered,
@@ -953,10 +972,8 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
         await callback.answer("⚠️ Не вдалося отримати завдання.", show_alert=True)
         return
     
-    # Оновлюємо стан
     await state.update_data(current_category=category, current_priority=priority)
     
-    # Видаляємо старе повідомлення і відправляємо нове
     try:
         await callback.message.delete()
         logger.info("🔧 Старе повідомлення видалено")
@@ -970,7 +987,6 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
 
 @router.callback_query()
 async def unknown_callback(callback: types.CallbackQuery) -> None:
-    # Цей рядок гарантовано покаже в логах Render, що саме ви натиснули
     logger.error(f"🚨 ПЕРЕХОПЛЕНА КНОПКА! callback_data = '{callback.data}'")
     await callback.answer()
 
@@ -1006,14 +1022,22 @@ async def process_category(message: types.Message, state: FSMContext) -> None:
 async def process_priority(message: types.Message, state: FSMContext) -> None:
     priority = PRIORITY_FROM_BUTTON.get(message.text, "normal")
     await state.update_data(priority=priority)
-    await message.answer("📅 Введіть дату виконання у форматі <b>ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>", reply_markup=types.ReplyKeyboardRemove(), parse_mode="HTML")
+    await message.answer(
+        "📅 Введіть дату виконання у форматі <b>ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>",
+        reply_markup=_cancel_keyboard(),
+        parse_mode="HTML"
+    )
     await state.set_state(TaskCreation.waiting_for_due_date)
 
 @router.message(TaskCreation.waiting_for_due_date)
 async def process_due_date(message: types.Message, state: FSMContext) -> None:
     due_date = _parse_user_date(message.text or "")
     if not due_date:
-        await message.answer("❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.", parse_mode="HTML")
+        await message.answer(
+            "❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.",
+            reply_markup=_cancel_keyboard(),
+            parse_mode="HTML"
+        )
         return
     await state.update_data(due_date=due_date)
     await _send_preview(message, state)
@@ -1022,7 +1046,11 @@ async def process_due_date(message: types.Message, state: FSMContext) -> None:
 async def process_date_input(message: types.Message, state: FSMContext) -> None:
     due_date = _parse_user_date(message.text or "")
     if not due_date:
-        await message.answer("❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.", parse_mode="HTML")
+        await message.answer(
+            "❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.",
+            reply_markup=_cancel_keyboard(),
+            parse_mode="HTML"
+        )
         return
     await state.update_data(due_date=due_date)
     await _send_preview(message, state)
@@ -1031,7 +1059,11 @@ async def process_date_input(message: types.Message, state: FSMContext) -> None:
 async def process_date_change(message: types.Message, state: FSMContext) -> None:
     due_date = _parse_user_date(message.text or "")
     if not due_date:
-        await message.answer("❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.", parse_mode="HTML")
+        await message.answer(
+            "❌ Невірний формат дати.\n\nВведіть дату як <b>ДД.ММ.РРРР</b>, наприклад <code>20.10.2026</code>.",
+            reply_markup=_cancel_keyboard(),
+            parse_mode="HTML"
+        )
         return
     await state.update_data(due_date=due_date, due_at=None)
     await _send_preview(message, state)
@@ -1045,25 +1077,17 @@ async def confirming_guard(message: types.Message, state: FSMContext) -> None:
 # 4. ПРИРОДНА МОВА
 # =============================================================================
 
-@router.message(F.text)  # Тимчасово прибрали StateFilter(None) для діагностики
+@router.message(F.text, StateFilter(None))
 async def handle_natural_language_task(message: types.Message, state: FSMContext) -> None:
-    # 1. Дізнаємося поточний стан FSM
     current_state = await state.get_state()
     logger.info(f"🔍 Вхідний текст: '{message.text}' | Поточний стан FSM: {current_state}")
 
     text = (message.text or "").strip()
     
-    # 2. Перевіряємо, чи це не службова команда
     if not text or _is_control_text(text):
         logger.info(f"⏭️ Ігноруємо контрольний текст або порожнє повідомлення: '{text}'")
         return
 
-    # 3. Якщо користувач у стані очікування дати під час створення, обробляємо це окремо
-    if current_state == "TaskCreation:waiting_for_date_input" or current_state == "TaskCreation:waiting_for_date_change":
-        logger.info("📅 Перенаправлення в обробник дати FSM")
-        return  # Дозволяємо спрацювати специфічним хендлерам FSM, які стоять вище
-
-    # 4. Запускаємо парсер
     try:
         logger.info(f"🧠 Запуск парсера для тексту: '{text}'")
         parsed = parse_natural_language(text)
@@ -1073,7 +1097,6 @@ async def handle_natural_language_task(message: types.Message, state: FSMContext
         await message.answer("⚠️ Сталася помилка при розпізнаванні. Спробуйте ще раз.")
         return
 
-    # 5. Перевіряємо результат
     title = (parsed.get("title") or "").strip()
     logger.info(f"📝 Витягнутий заголовок: '{title}'")
 
@@ -1087,7 +1110,6 @@ async def handle_natural_language_task(message: types.Message, state: FSMContext
         )
         return
 
-    # 6. Якщо все гаразд, зберігаємо дані
     await state.update_data(
         title=title,
         category=parsed.get("category", "personal"),
@@ -1110,7 +1132,8 @@ async def handle_natural_language_task(message: types.Message, state: FSMContext
             return
         else:
             await message.answer(
-                "📅 Вкажіть дату виконання у форматі <b>ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>", 
+                "📅 Вкажіть дату виконання у форматі <b>ДД.ММ.РРРР</b>\nНаприклад: <code>20.10.2026</code>",
+                reply_markup=_cancel_keyboard(),
                 parse_mode="HTML"
             )
             await state.set_state(TaskCreation.waiting_for_date_input)
