@@ -7,7 +7,7 @@ from datetime import datetime, date
 from html import escape
 from typing import Optional
 
-from aiogram import F, Router, types
+from aiogram import F, Router, types, Bot
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -227,34 +227,40 @@ def _format_task_line(task: dict) -> str:
     return f"<b>{title}</b>\n{date_and_meta}"
 
 
-async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict], category: Optional[str] = None, priority: Optional[str] = None) -> None:
+async def _send_tasks_list(
+    chat_id: int,
+    bot: Bot,
+    title: str,
+    tasks: list[dict],
+    category: Optional[str] = None,
+    priority: Optional[str] = None,
+    state: Optional[FSMContext] = None,
+) -> None:
     """Надсилає кожне завдання окремим повідомленням з кнопками."""
     
     message_ids = []
     
-    # Заголовок списку
     filter_note = ""
     if category:
         filter_note += f"\n👤 Категорія: {_escape(CATEGORY_LABEL.get(category, category))}"
     if priority:
         filter_note += f"\n⭐ Пріоритет: {_escape(PRIORITY_LABEL.get(priority, priority))}"
     
-    header_msg = await message.answer(
+    header_msg = await bot.send_message(
+        chat_id,
         f"<b>{_escape(title)}</b> ({len(tasks)}){filter_note}",
         parse_mode="HTML"
     )
     message_ids.append(header_msg.message_id)
     
     if not tasks:
-        empty_msg = await message.answer("📭 Завдань не знайдено.")
+        empty_msg = await bot.send_message(chat_id, "📭 Завдань не знайдено.")
         message_ids.append(empty_msg.message_id)
     else:
-        # Кожне завдання — окреме повідомлення
         for task in tasks:
             task_text = _format_task_line(task)
             task_id = task['id']
             
-            # Кнопки ✏️ та 🗑️ без тексту
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [
                     types.InlineKeyboardButton(text="✏️", callback_data=f"edit_menu_{task_id}"),
@@ -262,13 +268,11 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
                 ]
             ])
             
-            task_msg = await message.answer(task_text, reply_markup=keyboard, parse_mode="HTML")
+            task_msg = await bot.send_message(chat_id, task_text, reply_markup=keyboard, parse_mode="HTML")
             message_ids.append(task_msg.message_id)
     
-    # Фільтри — окреме повідомлення
     filter_buttons = []
     
-    # Категорії
     category_row = []
     for value, label in (("personal", "👤 Особисті"), ("work", "💼 Робочі")):
         mark = " ✅" if category == value else ""
@@ -280,13 +284,8 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
         )
     filter_buttons.append(category_row)
     
-    # Пріоритети
     priority_row = []
-    for value, label in (
-        ("high", "🔴 Високий"),
-        ("normal", "🟡 Звичайний"),
-        ("low", "🔵 Низький"),
-    ):
+    for value, label in (("high", "🔴 Високий"), ("normal", "🟡 Звичайний"), ("low", "🔵 Низький")):
         mark = " ✅" if priority == value else ""
         priority_row.append(
             types.InlineKeyboardButton(
@@ -296,21 +295,21 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
         )
     filter_buttons.append(priority_row)
     
-    # Скинути фільтри
     if category or priority:
         filter_buttons.append([
             types.InlineKeyboardButton(text="🔄 Скинути фільтри", callback_data="filter_reset")
         ])
     
-    filter_msg = await message.answer(
+    filter_msg = await bot.send_message(
+        chat_id,
         "🎛️ <b>ФІЛЬТРИ</b>",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=filter_buttons),
         parse_mode="HTML"
     )
     message_ids.append(filter_msg.message_id)
     
-    # Зберігаємо ID всіх повідомлень у стані
-    await message.bot.data.setdefault("list_messages", {})[message.chat.id] = message_ids
+    if state:
+        await state.update_data(list_message_ids=message_ids)
 
 
 async def _show_task_list(message: types.Message, state: FSMContext, title: str, fetch_func, category: Optional[str] = None, priority: Optional[str] = None) -> None:
@@ -337,7 +336,7 @@ async def _show_task_list(message: types.Message, state: FSMContext, title: str,
     )
     await state.set_state(ListState.showing_list)
 
-    await _send_tasks_list(message, title, tasks, category, priority)
+    await _send_tasks_list(message.chat.id, message.bot, title, tasks, category, priority, state)
 
 
 def _format_recurrence_line(recurrence: dict) -> str:
@@ -680,7 +679,7 @@ async def process_search(message: types.Message, state: FSMContext) -> None:
     if not tasks:
         await message.answer(f"📭 За запитом «<b>{_escape(query)}</b>» нічого не знайдено.", parse_mode="HTML")
         return
-    await _send_tasks_list(message, f"🔎 Результати пошуку: «{query}»", tasks)
+    await _send_tasks_list(message.chat.id, message.bot, f"🔎 Результати пошуку: «{query}»", tasks, state=state)
 
 
 # --- РЕДАГУВАННЯ ---
@@ -932,19 +931,19 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
     
     await state.update_data(current_category=category, current_priority=priority)
     
-    # Видаляємо всі старі повідомлення списку
-    try:
-        message_ids = callback.bot.data.get("list_messages", {}).get(callback.message.chat.id, [])
-        for msg_id in message_ids:
-            try:
-                await callback.bot.delete_message(callback.message.chat.id, msg_id)
-            except Exception:
-                pass
-    except Exception as e:
-        logger.warning(f"Не вдалося видалити старі повідомлення: {e}")
-    
-    await _send_tasks_list(callback.message, title, tasks, category, priority)
+    # Видаляємо старі повідомлення списку
+    old_message_ids = data.get("list_message_ids", [])
+    chat_id = callback.message.chat.id
+    for msg_id in old_message_ids:
+        try:
+            await callback.bot.delete_message(chat_id, msg_id)
+        except Exception:
+            pass
+            
     await callback.answer()
+    
+    # Надсилаємо новий список
+    await _send_tasks_list(chat_id, callback.bot, title, tasks, category, priority, state)
 
 
 @router.callback_query()
