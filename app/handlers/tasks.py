@@ -705,17 +705,26 @@ async def open_edit_menu(callback: types.CallbackQuery) -> None:
             await callback.answer("Завдання не знайдено.", show_alert=True)
             return
         title = _escape(task.get("title"))
+        
+        # ДОДАНО КНОПКУ "❌ Скасувати"
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="📝 Змінити назву", callback_data=f"edit_title_{task_id}")],
             [types.InlineKeyboardButton(text="📅 Змінити дату", callback_data=f"edit_date_{task_id}")],
             [types.InlineKeyboardButton(text="⭐ Змінити пріоритет", callback_data=f"edit_priority_{task_id}")],
-            [types.InlineKeyboardButton(text="↩️ Назад", callback_data="back_to_list")],
+            [types.InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel_edit")],
         ])
-        await callback.message.edit_text(f"✏️ <b>Редагування завдання:</b>\n\n📝 {title}\n\nОберіть, що змінити:", reply_markup=keyboard, parse_mode="HTML")
+        await callback.message.edit_text(f"✏️ <b>Редагування завдання:</b>\n\n📝 {title}\n\nОберіть дію:", reply_markup=keyboard, parse_mode="HTML")
         await callback.answer()
     except Exception as e:
         logger.error(f"Помилка в open_edit_menu: {e}", exc_info=True)
         await callback.answer("Сталася помилка.", show_alert=True)
+
+@router.callback_query(F.data == "cancel_edit")
+async def cancel_edit(callback: types.CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.message.delete()
+    await callback.message.answer("❌ Редагування скасовано.", reply_markup=get_main_menu_keyboard())
+    await callback.answer()
 
 @router.callback_query(F.data == "back_to_list")
 async def back_to_list(callback: types.CallbackQuery) -> None:

@@ -185,7 +185,7 @@ async def get_tasks_without_due_date(user_id: int) -> List[Dict[str, Any]]:
 
 
 async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
-    """Оновити завдання з явним приведенням типів для PostgreSQL."""
+    """Оновити завдання з надійною конвертацією типів для asyncpg."""
     if not kwargs:
         return False
     
@@ -196,17 +196,26 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
         logger.warning(f"⚠️ Спроба оновити недозволені поля: {kwargs.keys()}")
         return False
     
-    # Формуємо SET clause з ЯВНИМ приведенням типів для дат
-    set_parts = []
-    for i, k in enumerate(update_fields.keys()):
-        if k in ('due_at', 'completed_at'):
-            set_parts.append(f"{k} = ${i+3}::timestamp")
-        elif k == 'due_date':
-            set_parts.append(f"{k} = ${i+3}::date")
-        else:
-            set_parts.append(f"{k} = ${i+3}")
+    # НАДІЙНА КОНВЕРТАЦІЯ: asyncpg найкраще працює з нативними об'єктами Python
+    if 'due_date' in update_fields and isinstance(update_fields['due_date'], str):
+        try:
+            update_fields['due_date'] = datetime.strptime(update_fields['due_date'], "%Y-%m-%d").date()
+        except ValueError:
+            pass
     
-    set_clause = ", ".join(set_parts)
+    if 'due_at' in update_fields and isinstance(update_fields['due_at'], str):
+        try:
+            update_fields['due_at'] = datetime.fromisoformat(update_fields['due_at'])
+        except ValueError:
+            pass
+
+    if 'completed_at' in update_fields and isinstance(update_fields['completed_at'], str):
+        try:
+            update_fields['completed_at'] = datetime.fromisoformat(update_fields['completed_at'])
+        except ValueError:
+            pass
+
+    set_clause = ", ".join(f"{k} = ${i+3}" for i, k in enumerate(update_fields.keys()))
     values = list(update_fields.values()) + [task_id, user_id]
     
     query = f"""
@@ -218,10 +227,10 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
     async with get_connection() as conn:
         try:
             status = await conn.execute(query, *values)
-            logger.info(f"✅ Оновлення завдання {task_id} успішне: {status}")
+            logger.info(f"✅ UPDATE успішний: {status} (task_id={task_id})")
             return "UPDATE 1" in status
         except Exception as e:
-            logger.error(f"🔧 КРИТИЧНА ПОМИЛКА SQL при оновленні: {e}", exc_info=True)
+            logger.error(f"❌ SQL ПОМИЛКА UPDATE: {e} | Query: {query} | Values: {values}", exc_info=True)
             return False
 
 
