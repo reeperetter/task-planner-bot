@@ -215,7 +215,8 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
         except ValueError:
             pass
 
-    set_clause = ", ".join(f"{k} = ${i+3}" for i, k in enumerate(update_fields.keys()))
+    # ВИПРАВЛЕНО: параметри починаються з $1, а не з $3
+    set_clause = ", ".join(f"{k} = ${i+1}" for i, k in enumerate(update_fields.keys()))
     values = list(update_fields.values()) + [task_id, user_id]
     
     query = f"""
