@@ -281,6 +281,11 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
                 types.InlineKeyboardButton(text=f"🗑️ {label}", callback_data=f"delete_{task_id}"),
             ])
 
+        # === РОЗДІЛЮВАЧ МІЖ ЗАВДАННЯМИ ТА ФІЛЬТРАМИ ===
+        buttons.append([types.InlineKeyboardButton(text="━" * 20, callback_data="ignore")])
+        buttons.append([types.InlineKeyboardButton(text="🎛️ Фільтри", callback_data="ignore")])
+        
+        # Кнопки категорії
         filter_buttons = []
         if category == "personal":
             filter_buttons.append(types.InlineKeyboardButton(text="✅ 👤 Особисті", callback_data="filter_reset"))
@@ -294,6 +299,7 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
         
         buttons.append(filter_buttons)
         
+        # Кнопки пріоритету
         priority_buttons = []
         if priority == "high":
             priority_buttons.append(types.InlineKeyboardButton(text="✅ 🔴 Високий", callback_data="filter_reset"))
@@ -312,6 +318,7 @@ async def _send_tasks_list(message: types.Message, title: str, tasks: list[dict]
         
         buttons.append(priority_buttons)
         
+        # Кнопка скинути фільтри (якщо є активні фільтри)
         if category or priority:
             buttons.append([types.InlineKeyboardButton(text="🔄 Скинути фільтри", callback_data="filter_reset")])
 
