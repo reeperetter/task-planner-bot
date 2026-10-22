@@ -82,7 +82,7 @@ CANCEL_TEXT = "❌ Скасувати"
 
 HELP_TEXT = (
     "❓ <b>Допомога користувачу</b>\n\n"
-    "Я — ваш особистий планувальник. Допоможу не забувати про важливі справи.\n\n"
+    "Я — ваш особистий planувальник. Допоможу не забувати про важливі справи.\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>➕ ЯК СТВОРИТИ ЗАВДАННЯ</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -121,13 +121,14 @@ HELP_TEXT = (
     "• <b>📋 Заплановані</b> — усі завдання з датою сьогодні або в майбутньому\n"
     "• <b>✅ Виконані</b> — завдання, строк яких уже минув\n"
     "• <b>🔄 Повторювані</b> — усі активні повторювані завдання\n\n"
-    "Завдання сортуються спочатку за датою, потім за пріоритетом.\n\n"
+    "Для зручності кожне завдання відображається окремим повідомленням. Завдання сортуються спочатку за датою, потім за пріоритетом.\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>✏️ РЕДАГУВАННЯ ТА ВИДАЛЕННЯ</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "У будь-якому списку поруч із кожним завданням є кнопки:\n"
+    "Під кожним завданням є кнопки:\n"
     "• ✏️ <b>Редагувати</b> — змінити назву, дату або пріоритет\n"
-    "• 🗑️ <b>Видалити</b> — повністю видалити завдання\n\n"
+    "• 🗑️ <b>Видалити</b> — повністю видалити завдання (з підтвердженням)\n\n"
+    "Внизу списку розташовані 🎛️ <b>Фільтри</b>, щоб швидко показати тільки потрібні завдання.\n"
     "Якщо це був останній екземпляр повторюваного завдання — правило автоматично видалиться.\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>🔍 ПОШУК</b>\n"
@@ -155,7 +156,7 @@ HELP_TEXT = (
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     "• Якщо ви випадково ввели минулу дату для повторюваного завдання — "
     "я автоматично перенесу його на найближчу майбутню дату.\n"
-    "• Натисніть «❌ Скасувати» у будь-який момент, щоб перервати створення.\n"
+    "• Натисніть «❌ Скасувати» у будь-який момент, щоб перервати створення або редагування.\n"
     "• Дані зберігаються у хмарній базі даних і не зникають при оновленнях.\n\n"
     "Готові? Просто напишіть своє перше завдання 👇"
 )
@@ -817,22 +818,69 @@ async def confirm_delete(callback: types.CallbackQuery) -> None:
     except (ValueError, AttributeError):
         await callback.answer()
         return
+        
     user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
     if user_id is None:
         await callback.answer("Користувача не знайдено.", show_alert=True)
         return
+        
     try:
         result = await task_service.delete_task(task_id, user_id)
     except Exception:
         logger.exception("Помилка видалення завдання %s", task_id)
         await callback.answer("⚠️ Не вдалося видалити завдання.", show_alert=True)
         return
+        
     if result.get("status") == "success":
-        await callback.message.edit_text("✅ Завдання видалено.", reply_markup=_empty_inline_keyboard())
+        # Редагуємо повідомлення на підтвердження успіху
+        await callback.message.edit_text("✅ Завдання успішно видалено.", reply_markup=_empty_inline_keyboard())
         await callback.answer("Завдання видалено.")
     else:
         await callback.message.edit_text("ℹ️ Завдання вже видалено або недоступне.", reply_markup=_empty_inline_keyboard())
         await callback.answer()
+
+@router.callback_query(F.data.startswith("delete_cancel_"))
+async def cancel_delete(callback: types.CallbackQuery) -> None:
+    # Повертаємо вигляд завдання (або просто повідомляємо про скасування)
+    await callback.message.edit_text("↩️ Видалення скасовано. Завдання залишилося.", reply_markup=_empty_inline_keyboard())
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("delete_"))
+async def ask_delete(callback: types.CallbackQuery) -> None:
+    raw = callback.data or ""
+    parts = raw.split("_")
+    if len(parts) != 2 or not parts[1].isdigit():
+        await callback.answer()
+        return
+        
+    task_id = int(parts[1])
+    user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
+    if user_id is None:
+        await callback.answer("Користувача не знайдено.", show_alert=True)
+        return
+        
+    try:
+        task = await task_service.get_task(task_id, user_id)
+    except Exception:
+        logger.exception("Помилка отримання завдання %s", task_id)
+        await callback.answer("⚠️ Не вдалося отримати завдання.", show_alert=True)
+        return
+        
+    if task is None:
+        await callback.answer("Завдання вже видалено. Оновіть список.", show_alert=True)
+        return
+        
+    title = _escape(task.get("title") or "Без назви")
+    
+    await callback.message.edit_text(
+        f"🗑️ <b>Видалити це завдання?</b>\n\n📝 {title}\n\nЦю дію неможливо скасувати.",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="✅ Так, видалити", callback_data=f"delete_confirm_{task_id}")],
+            [types.InlineKeyboardButton(text="↩️ Ні, залишити", callback_data=f"delete_cancel_{task_id}")],
+        ]),
+        parse_mode="HTML",
+    )
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("delete_cancel_"))
 async def cancel_delete(callback: types.CallbackQuery) -> None:
