@@ -1209,7 +1209,7 @@ async def confirming_guard(message: types.Message, state: FSMContext) -> None:
 # 4. ПРИРОДНА МОВА
 # =============================================================================
 
-@router.message(F.text, StateFilter(None))
+@router.message(F.text, StateFilter(None, ListState.showing_list))
 async def handle_natural_language_task(message: types.Message, state: FSMContext) -> None:
     current_state = await state.get_state()
     logger.info(f"🔍 Вхідний текст: '{message.text}' | Поточний стан FSM: {current_state}")
