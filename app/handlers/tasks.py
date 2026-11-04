@@ -265,6 +265,7 @@ async def _send_tasks_list(
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [
                     types.InlineKeyboardButton(text="✏️", callback_data=f"edit_menu_{task_id}"),
+                    types.InlineKeyboardButton(text="✅", callback_data=f"complete_{task_id}"),
                     types.InlineKeyboardButton(text="🗑️", callback_data=f"delete_{task_id}"),
                 ]
             ])
@@ -807,6 +808,48 @@ async def process_new_priority(callback: types.CallbackQuery, state: FSMContext)
         logger.error(f"Помилка при зміні пріоритету: {e}", exc_info=True)
         await callback.answer("Сталася помилка.", show_alert=True)
         await state.clear()
+
+
+# --- ВИКОНАННЯ ЗАВДАННЯ ---
+
+@router.callback_query(F.data.startswith("complete_"))
+async def complete_task_handler(callback: types.CallbackQuery) -> None:
+    try:
+        task_id = int(callback.data.split("_")[-1])
+    except (ValueError, AttributeError):
+        await callback.answer()
+        return
+        
+    user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
+    if user_id is None:
+        await callback.answer("Користувача не знайдено.", show_alert=True)
+        return
+        
+    try:
+        result = await task_service.complete_task(task_id, user_id)
+    except Exception as e:
+        logger.exception("Помилка виконання завдання %s", task_id)
+        await callback.answer("⚠️ Не вдалося виконати завдання.", show_alert=True)
+        return
+        
+    if result.get("status") == "success":
+        new_task_msg = ""
+        if result.get("new_task_id"):
+            new_task_msg = "\n\n🔄 Наступний екземпляр створено автоматично."
+        
+        # Редагуємо поточне повідомлення, щоб екран не прокручувався вниз
+        await callback.message.edit_text(
+            f"✅ <b>Завдання виконано!</b>{new_task_msg}",
+            reply_markup=_empty_inline_keyboard(),
+            parse_mode="HTML"
+        )
+        await callback.answer("Завдання виконано!")
+    else:
+        await callback.answer(result.get("message", "Помилка"), show_alert=True)
+
+
+# --- ВИДАЛЕННЯ ---
+# (тут залишається ваш існуючий код видалення)
 
 
 # --- ВИДАЛЕННЯ ---
