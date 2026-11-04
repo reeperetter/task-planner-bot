@@ -76,3 +76,4 @@ CREATE INDEX IF NOT EXISTS idx_tasks_category ON tasks(category);
 CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
 CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_rule_id ON tasks(recurrence_rule_id);
 CREATE INDEX IF NOT EXISTS idx_report_log_user_date ON report_log(user_id, report_date);
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notified_at TIMESTAMP;

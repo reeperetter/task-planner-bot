@@ -15,6 +15,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from app.config import config
 from app.database.migrations import run_migrations
 from app.handlers import start, tasks
+from app.services.scheduler_service import start_reminder_scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,22 +61,21 @@ async def main() -> None:
 
     logger.info("Бот успішно запущено у режимі polling.")
 
-    # ФУНКЦІЯ МИТТЄВОГО ВИМКНЕННЯ
     def handle_sigterm():
-        logger.info("⚠️ Отримано сигнал завершення (SIGTERM). Миттєве вимкнення для уникнення конфлікту...")
-        # Закриваємо сесію бота, щоб Telegram одразу звільнив токен
+        logger.info("⚠️ Отримано сигнал завершення (SIGTERM). Миттєве вимкнення...")
         asyncio.create_task(bot.session.close())
         sys.exit(0)
 
-    # Реєструємо обробник сигналів від Render
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
     loop.add_signal_handler(signal.SIGINT, handle_sigterm)
 
     try:
+        # ДОДАНО: start_reminder_scheduler(bot) для фонових нагадувань
         await asyncio.gather(
             dp.start_polling(bot),
-            start_web_server()
+            start_web_server(),
+            start_reminder_scheduler(bot)
         )
     except asyncio.CancelledError:
         logger.info("Роботу перервано")
