@@ -82,7 +82,7 @@ CANCEL_TEXT = "❌ Скасувати"
 
 HELP_TEXT = (
     "❓ <b>Допомога користувачу</b>\n\n"
-    "Я — ваш особистий planувальник. Допоможу не забувати про важливі справи.\n\n"
+    "Я — ваш особистий планувальник. Допоможу не забувати про важливі справи.\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>➕ ЯК СТВОРИТИ ЗАВДАННЯ</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -121,13 +121,13 @@ HELP_TEXT = (
     "• <b>📋 Заплановані</b> — усі завдання з датою сьогодні або в майбутньому\n"
     "• <b>✅ Виконані</b> — завдання, строк яких уже минув\n"
     "• <b>🔄 Повторювані</b> — усі активні повторювані завдання\n\n"
-    "Для зручності кожне завдання відображається окремим повідомленням. Завдання сортуються спочатку за датою, потім за пріоритетом.\n\n"
+    "За замовчуванням завдання відображаються компактно. Натисніть «✏️ Редагувати список», щоб побачити кнопки редагування та видалення під кожним завданням.\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     "<b>✏️ РЕДАГУВАННЯ ТА ВИДАЛЕННЯ</b>\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "Під кожним завданням є кнопки:\n"
+    "У режимі редагування під кожним завданням є кнопки:\n"
     "• ✏️ <b>Редагувати</b> — змінити назву, дату або пріоритет\n"
-    "• 🗑️ <b>Видалити</b> — повністю видалити завдання (з підтвердженням)\n\n"
+    "• 🗑️ <b>Видалити</b> — повністю видалити завдання\n\n"
     "Внизу списку розташовані 🎛️ <b>Фільтри</b>, щоб швидко показати тільки потрібні завдання.\n"
     "Якщо це був останній екземпляр повторюваного завдання — правило автоматично видалиться.\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -215,8 +215,8 @@ def _format_due(task: dict) -> str:
     return "без строку"
 
 
-def _format_task_line(task: dict) -> str:
-    """Форматування одного завдання."""
+def _format_task_line(task: dict, index: int = 0) -> str:
+    """Форматування одного завдання для списку з нумерацією."""
     priority = PRIORITY_EMOJI.get(task.get("priority", "normal"), "🟡")
     category = "💼" if task.get("category") == "work" else "👤"
     title = _escape(task.get("title") or "Без назви")
@@ -225,10 +225,13 @@ def _format_task_line(task: dict) -> str:
     recurrence_mark = " 🔁" if task.get("recurrence_rule_id") else ""
     date_and_meta = f"{due} {priority} {category}{recurrence_mark}"
     
-    return f"<b>{title}</b>\n{date_and_meta}"
+    if index > 0:
+        return f"{index}. <b>{title}</b>\n   {date_and_meta}"
+    else:
+        return f"<b>{title}</b>\n   {date_and_meta}"
 
 
-async def _send_tasks_list(
+async def _send_tasks_list_compact(
     chat_id: int,
     bot: Bot,
     title: str,
@@ -237,7 +240,95 @@ async def _send_tasks_list(
     priority: Optional[str] = None,
     state: Optional[FSMContext] = None,
 ) -> None:
-    """Надсилає кожне завдання окремим повідомленням з кнопками."""
+    """Компактний режим: всі завдання одним повідомленням + кнопка 'Редагувати список'."""
+    
+    message_ids = []
+    
+    filter_note = ""
+    if category:
+        filter_note += f"\n👤 Категорія: {_escape(CATEGORY_LABEL.get(category, category))}"
+    if priority:
+        filter_note += f"\n⭐ Пріоритет: {_escape(PRIORITY_LABEL.get(priority, priority))}"
+    
+    if not tasks:
+        empty_msg = await bot.send_message(
+            chat_id,
+            f"<b>{_escape(title)}</b> (0){filter_note}\n\n📭 Завдань не знайдено.",
+            parse_mode="HTML"
+        )
+        message_ids.append(empty_msg.message_id)
+    else:
+        # Формуємо текст зі всіма завданнями
+        body_parts = []
+        for index, task in enumerate(tasks, start=1):
+            body_parts.append(_format_task_line(task, index))
+        body = "\n\n".join(body_parts)
+        
+        # Кнопка "Редагувати список"
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="✏️ Редагувати список", callback_data="switch_to_detail_mode")]
+        ])
+        
+        list_msg = await bot.send_message(
+            chat_id,
+            f"<b>{_escape(title)}</b> ({len(tasks)}){filter_note}\n\n{body}",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        message_ids.append(list_msg.message_id)
+    
+    # Фільтри
+    filter_buttons = []
+    
+    category_row = []
+    for value, label in (("personal", "👤 Особисті"), ("work", "💼 Робочі")):
+        mark = " ✅" if category == value else ""
+        category_row.append(
+            types.InlineKeyboardButton(
+                text=f"{label}{mark}",
+                callback_data=f"filter_category_{value}",
+            )
+        )
+    filter_buttons.append(category_row)
+    
+    priority_row = []
+    for value, label in (("high", "🔴 Високий"), ("normal", "🟡 Звичайний"), ("low", "🔵 Низький")):
+        mark = " ✅" if priority == value else ""
+        priority_row.append(
+            types.InlineKeyboardButton(
+                text=f"{label}{mark}",
+                callback_data=f"filter_priority_{value}",
+            )
+        )
+    filter_buttons.append(priority_row)
+    
+    if category or priority:
+        filter_buttons.append([
+            types.InlineKeyboardButton(text="🔄 Скинути фільтри", callback_data="filter_reset")
+        ])
+    
+    filter_msg = await bot.send_message(
+        chat_id,
+        "🎛️ <b>ФІЛЬТРИ</b>",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=filter_buttons),
+        parse_mode="HTML"
+    )
+    message_ids.append(filter_msg.message_id)
+    
+    if state:
+        await state.update_data(list_message_ids=message_ids, list_mode="compact")
+
+
+async def _send_tasks_list_detail(
+    chat_id: int,
+    bot: Bot,
+    title: str,
+    tasks: list[dict],
+    category: Optional[str] = None,
+    priority: Optional[str] = None,
+    state: Optional[FSMContext] = None,
+) -> None:
+    """Детальний режим: кожне завдання окремим повідомленням з кнопками."""
     
     message_ids = []
     
@@ -311,7 +402,7 @@ async def _send_tasks_list(
     message_ids.append(filter_msg.message_id)
     
     if state:
-        await state.update_data(list_message_ids=message_ids)
+        await state.update_data(list_message_ids=message_ids, list_mode="detail")
 
 
 async def _show_task_list(message: types.Message, state: FSMContext, title: str, fetch_func, category: Optional[str] = None, priority: Optional[str] = None) -> None:
@@ -338,7 +429,8 @@ async def _show_task_list(message: types.Message, state: FSMContext, title: str,
     )
     await state.set_state(ListState.showing_list)
 
-    await _send_tasks_list(message.chat.id, message.bot, title, tasks, category, priority, state)
+    # За замовчуванням використовуємо компактний режим
+    await _send_tasks_list_compact(message.chat.id, message.bot, title, tasks, category, priority, state)
 
 
 def _format_recurrence_line(recurrence: dict) -> str:
@@ -681,7 +773,60 @@ async def process_search(message: types.Message, state: FSMContext) -> None:
     if not tasks:
         await message.answer(f"📭 За запитом «<b>{_escape(query)}</b>» нічого не знайдено.", parse_mode="HTML")
         return
-    await _send_tasks_list(message.chat.id, message.bot, f"🔎 Результати пошуку: «{query}»", tasks, state=state)
+    # Пошук використовує компактний режим
+    await _send_tasks_list_compact(message.chat.id, message.bot, f"🔎 Результати пошуку: «{query}»", tasks, state=state)
+
+
+# --- ПЕРЕМИКАННЯ МІЖ РЕЖИМАМИ ---
+
+@router.callback_query(F.data == "switch_to_detail_mode")
+async def switch_to_detail_mode(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Перемикає з компактного режиму в детальний."""
+    data = await state.get_data()
+    list_func_name = data.get("current_list_func")
+    title = data.get("current_list_title", "Завдання")
+    category = data.get("current_category")
+    priority = data.get("current_priority")
+    
+    func_map = {
+        "get_tasks_today": task_service.get_tasks_today_filtered,
+        "get_tasks_tomorrow": task_service.get_tasks_tomorrow_filtered,
+        "get_tasks_week": task_service.get_tasks_week_filtered,
+        "get_planned_tasks": task_service.get_planned_tasks_filtered,
+        "get_done_tasks": task_service.get_done_tasks_filtered,
+        "get_recurring_tasks": task_service.get_recurring_tasks_filtered,
+    }
+    
+    fetch_func = func_map.get(list_func_name)
+    if not fetch_func:
+        await callback.answer("Помилка: не вдалося визначити тип списку.", show_alert=True)
+        return
+    
+    user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
+    if user_id is None:
+        await callback.answer("Користувача не знайдено.", show_alert=True)
+        return
+    
+    try:
+        tasks = await fetch_func(user_id, category, priority)
+    except Exception as e:
+        logger.exception(f"Помилка отримання завдань: {e}")
+        await callback.answer("⚠️ Не вдалося отримати завдання.", show_alert=True)
+        return
+    
+    # Видаляємо старі повідомлення
+    old_message_ids = data.get("list_message_ids", [])
+    chat_id = callback.message.chat.id
+    for msg_id in old_message_ids:
+        try:
+            await callback.bot.delete_message(chat_id, msg_id)
+        except Exception:
+            pass
+    
+    await callback.answer()
+    
+    # Надсилаємо в детальному режимі
+    await _send_tasks_list_detail(chat_id, callback.bot, title, tasks, category, priority, state)
 
 
 # --- РЕДАГУВАННЯ ---
@@ -837,7 +982,6 @@ async def complete_task_handler(callback: types.CallbackQuery) -> None:
         if result.get("new_task_id"):
             new_task_msg = "\n\n🔄 Наступний екземпляр створено автоматично."
         
-        # Редагуємо поточне повідомлення, щоб екран не прокручувався вниз
         await callback.message.edit_text(
             f"✅ <b>Завдання виконано!</b>{new_task_msg}",
             reply_markup=_empty_inline_keyboard(),
@@ -849,10 +993,6 @@ async def complete_task_handler(callback: types.CallbackQuery) -> None:
 
 
 # --- ВИДАЛЕННЯ ---
-# (тут залишається ваш існуючий код видалення)
-
-
-# --- ВИДАЛЕННЯ ---
 
 @router.callback_query(F.data.startswith("delete_confirm_"))
 async def confirm_delete(callback: types.CallbackQuery) -> None:
@@ -861,22 +1001,18 @@ async def confirm_delete(callback: types.CallbackQuery) -> None:
     except (ValueError, AttributeError):
         await callback.answer()
         return
-        
     user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
     if user_id is None:
         await callback.answer("Користувача не знайдено.", show_alert=True)
         return
-        
     try:
         result = await task_service.delete_task(task_id, user_id)
     except Exception:
         logger.exception("Помилка видалення завдання %s", task_id)
         await callback.answer("⚠️ Не вдалося видалити завдання.", show_alert=True)
         return
-        
     if result.get("status") == "success":
-        # Редагуємо повідомлення на підтвердження успіху
-        await callback.message.edit_text("✅ Завдання успішно видалено.", reply_markup=_empty_inline_keyboard())
+        await callback.message.edit_text("✅ Завдання видалено.", reply_markup=_empty_inline_keyboard())
         await callback.answer("Завдання видалено.")
     else:
         await callback.message.edit_text("ℹ️ Завдання вже видалено або недоступне.", reply_markup=_empty_inline_keyboard())
@@ -884,7 +1020,6 @@ async def confirm_delete(callback: types.CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("delete_cancel_"))
 async def cancel_delete(callback: types.CallbackQuery) -> None:
-    # Повертаємо вигляд завдання (або просто повідомляємо про скасування)
     await callback.message.edit_text("↩️ Видалення скасовано. Завдання залишилося.", reply_markup=_empty_inline_keyboard())
     await callback.answer()
 
@@ -895,65 +1030,23 @@ async def ask_delete(callback: types.CallbackQuery) -> None:
     if len(parts) != 2 or not parts[1].isdigit():
         await callback.answer()
         return
-        
     task_id = int(parts[1])
     user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
     if user_id is None:
         await callback.answer("Користувача не знайдено.", show_alert=True)
         return
-        
     try:
         task = await task_service.get_task(task_id, user_id)
     except Exception:
         logger.exception("Помилка отримання завдання %s", task_id)
         await callback.answer("⚠️ Не вдалося отримати завдання.", show_alert=True)
         return
-        
     if task is None:
         await callback.answer("Завдання вже видалено. Оновіть список.", show_alert=True)
         return
-        
     title = _escape(task.get("title") or "Без назви")
-    
     await callback.message.edit_text(
         f"🗑️ <b>Видалити це завдання?</b>\n\n📝 {title}\n\nЦю дію неможливо скасувати.",
-        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="✅ Так, видалити", callback_data=f"delete_confirm_{task_id}")],
-            [types.InlineKeyboardButton(text="↩️ Ні, залишити", callback_data=f"delete_cancel_{task_id}")],
-        ]),
-        parse_mode="HTML",
-    )
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("delete_cancel_"))
-async def cancel_delete(callback: types.CallbackQuery) -> None:
-    await callback.message.edit_text("↩️ Видалення скасовано. Завдання залишилося.", reply_markup=_empty_inline_keyboard())
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("delete_"))
-async def ask_delete(callback: types.CallbackQuery) -> None:
-    raw = callback.data or ""
-    parts = raw.split("_")
-    if len(parts) != 2 or not parts[1].isdigit():
-        await callback.answer()
-        return
-    task_id = int(parts[1])
-    user_id = await user_repository.get_user_id_by_telegram_id(callback.from_user.id)
-    if user_id is None:
-        await callback.answer("Користувача не знайдено.", show_alert=True)
-        return
-    try:
-        task = await task_service.get_task(task_id, user_id)
-    except Exception:
-        logger.exception("Помилка отримання завдання %s", task_id)
-        await callback.answer("⚠️ Не вдалося отримати завдання.", show_alert=True)
-        return
-    if task is None:
-        await callback.answer("Завдання вже видалено. Оновіть список.", show_alert=True)
-        return
-    title = _escape(task.get("title") or "Без назви")
-    await callback.message.answer(
-        f"🗑️ <b>Видалити завдання?</b>\n\n📝 {title}\n\nЦю дію неможливо скасувати.",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="✅ Так, видалити", callback_data=f"delete_confirm_{task_id}")],
             [types.InlineKeyboardButton(text="↩️ Ні, залишити", callback_data=f"delete_cancel_{task_id}")],
@@ -993,6 +1086,7 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
     data = await state.get_data()
     list_func_name = data.get("current_list_func")
     title = data.get("current_list_title", "Завдання")
+    current_mode = data.get("list_mode", "compact")
     
     func_map = {
         "get_tasks_today": task_service.get_tasks_today_filtered,
@@ -1022,7 +1116,7 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
     
     await state.update_data(current_category=category, current_priority=priority)
     
-    # Видаляємо старі повідомлення списку
+    # Видаляємо старі повідомлення
     old_message_ids = data.get("list_message_ids", [])
     chat_id = callback.message.chat.id
     for msg_id in old_message_ids:
@@ -1030,11 +1124,14 @@ async def _apply_filter(callback: types.CallbackQuery, state: FSMContext, catego
             await callback.bot.delete_message(chat_id, msg_id)
         except Exception:
             pass
-            
+    
     await callback.answer()
     
-    # Надсилаємо новий список
-    await _send_tasks_list(chat_id, callback.bot, title, tasks, category, priority, state)
+    # Надсилаємо в тому ж режимі, що й був
+    if current_mode == "detail":
+        await _send_tasks_list_detail(chat_id, callback.bot, title, tasks, category, priority, state)
+    else:
+        await _send_tasks_list_compact(chat_id, callback.bot, title, tasks, category, priority, state)
 
 
 @router.callback_query()
