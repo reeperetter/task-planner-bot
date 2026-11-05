@@ -1,12 +1,5 @@
-"""Головний файл запуску бота."""
-
 import asyncio
 import logging
-import os
-import signal
-import sys
-
-from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -14,74 +7,58 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import config
 from app.database.migrations import run_migrations
-from app.handlers import start, tasks
-from app.services.scheduler_service import start_reminder_scheduler
+from app.repositories.task_repository import TaskRepository
+from app.repositories.user_repository import UserRepository
+from app.services.scheduler_service import SchedulerService
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+# Твої роутери
+from app.handlers.start import router as start_router
+from app.handlers.tasks import router as tasks_router
 
-
-async def handle_ping(request):
-    """Обробник для UptimeRobot та перевірки здоров'я Render."""
-    return web.Response(text="Bot is alive and polling!")
-
-
-async def start_web_server():
-    """Запускає веб-сервер, щоб Render бачив відкритий порт."""
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
+async def main():
+    # Налаштування логування
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    )
     
-    port = int(os.getenv("PORT", 10000))
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logger.info(f"✅ Веб-сервер успішно запущено і тримає порт {port}")
-    
-    await asyncio.Event().wait()
-
-
-async def main() -> None:
-    logger.info("Ініціалізація бота...")
+    # Запуск міграцій бази даних перед стартом бота
+    logging.info("Запуск міграцій бази даних...")
     await run_migrations()
-    logger.info("База даних ініціалізовано")
 
+    # Ініціалізація бота з використанням твоїх DefaultBotProperties та ParseMode
     bot = Bot(
-        token=config.BOT_TOKEN,
+        token=config.BOT_TOKEN, 
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
+    
+    # Ініціалізація диспетчера з MemoryStorage
     dp = Dispatcher(storage=MemoryStorage())
 
-    dp.include_router(start.router)
-    dp.include_router(tasks.router)
+    # Підключення роутерів
+    dp.include_router(start_router)
+    dp.include_router(tasks_router)
 
-    logger.info("Бот успішно запущено у режимі polling.")
+    # Ініціалізація репозиторіїв бази даних
+    task_repo = TaskRepository()
+    user_repo = UserRepository()
 
-    def handle_sigterm():
-        logger.info("⚠️ Отримано сигнал завершення (SIGTERM). Миттєве вимкнення...")
-        asyncio.create_task(bot.session.close())
-        sys.exit(0)
+    # Ініціалізація та запуск фонового планувальника нагадувань
+    scheduler_service = SchedulerService(bot, task_repo, user_repo)
+    scheduler_service.start()
+    logging.info("Планувальник задач успішно запущено.")
 
-    loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
-    loop.add_signal_handler(signal.SIGINT, handle_sigterm)
-
+    # Пропуск накопичених оновлень та старт polling
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     try:
-        # ДОДАНО: start_reminder_scheduler(bot) для фонових нагадувань
-        await asyncio.gather(
-            dp.start_polling(bot),
-            start_web_server(),
-            start_reminder_scheduler(bot)
-        )
-    except asyncio.CancelledError:
-        logger.info("Роботу перервано")
+        logging.info("Бот запущено в режимі polling...")
+        await dp.start_polling(bot)
     finally:
         await bot.session.close()
 
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardIncrement, SystemExit) if hasattr(asyncio, 'SystemExit') else (KeyboardInterrupt, SystemExit):
+        logging.info("Роботу бота зупинено користувачем.")
