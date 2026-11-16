@@ -5,24 +5,26 @@ import calendar
 from datetime import datetime, date, timedelta
 from typing import Optional
 from app.repositories import recurrence_repository, task_repository
+from app.utils.dates import today_kyiv
 
 logger = logging.getLogger(__name__)
 
 WEEKDAY_MAP = {
-    "пн": 1, "пон": 1, "понед": 1, "понеділок": 1,
-    "вт": 2, "вів": 2, "вівтор": 2, "вівторок": 2,
-    "ср": 3, "сер": 3, "серед": 3, "середа": 3,
-    "чт": 4, "чет": 4, "четвер": 4,
+    "пн": 1, "пон": 1, "понед": 1, "понеділок": 1, "щопонеділка": 1,
+    "вт": 2, "вів": 2, "вівтор": 2, "вівторок": 2, "щовівторка": 2,
+    "ср": 3, "сер": 3, "серед": 3, "середа": 3, "щосереди": 3,
+    "чт": 4, "чет": 4, "четвер": 4, "щочетверга": 4,
     "пт": 5, "пят": 5, "п'ят": 5, "пятниц": 5, "п'ятниц": 5,
-    "сб": 6, "суб": 6, "субот": 6, "субота": 6,
-    "нд": 7, "нед": 7, "неділ": 7, "неділя": 7,
+    "щоп'ятниці": 5, "щоп'ятниця": 5, "щопятниці": 5, "щопятниця": 5,
+    "сб": 6, "суб": 6, "субот": 6, "субота": 6, "щосуботи": 6,
+    "нд": 7, "нед": 7, "неділ": 7, "неділя": 7, "щонеділі": 7,
 }
 
 
 def parse_days_of_week(text: str) -> list[int]:
     """Парсить рядок із днями тижня у список ISO-номерів."""
     result = set()
-    text_lower = text.lower()
+    text_lower = text.lower().replace("’", "'").replace("ʼ", "'")
 
     for key, value in WEEKDAY_MAP.items():
         if key in text_lower:
@@ -79,66 +81,47 @@ def calculate_next_date(
         return None
 
     if rule_type == "monthly":
-        day_of_month = rule.get("day_of_month")
-        if not day_of_month:
-            day_of_month = current_due_date.day
-
+        day_of_month = rule.get("day_of_month") or current_due_date.day
         year = current_due_date.year
         month = current_due_date.month + 1
         if month > 12:
             month = 1
             year += 1
-
         max_day = calendar.monthrange(year, month)[1]
-        actual_day = min(day_of_month, max_day)
-
-        return date(year, month, actual_day)
+        return date(year, month, min(day_of_month, max_day))
 
     if rule_type == "every_n_months":
         interval = rule.get("interval_months")
         if not interval or interval <= 0:
             return None
-        
         day_of_month = current_due_date.day
-        
         year = current_due_date.year
         month = current_due_date.month + interval
-        
-        # Обробка переходу через рік
         while month > 12:
             month -= 12
             year += 1
-        
         max_day = calendar.monthrange(year, month)[1]
-        actual_day = min(day_of_month, max_day)
-        
-        return date(year, month, actual_day)
+        return date(year, month, min(day_of_month, max_day))
 
     if rule_type == "yearly":
-        interval = rule.get("interval_years")
-        if not interval or interval <= 0:
+        interval = rule.get("interval_years") or 1
+        if interval <= 0:
             return None
-        
         year = current_due_date.year + interval
         month = current_due_date.month
         day_of_month = current_due_date.day
-        
-        # Обробка 29 лютого у невисокосний рік
         max_day = calendar.monthrange(year, month)[1]
-        actual_day = min(day_of_month, max_day)
-        
-        return date(year, month, actual_day)
+        return date(year, month, min(day_of_month, max_day))
 
     logger.warning(f"Невідомий тип правила: {rule_type}")
     return None
 
 
-def calculate_next_date_after_today(rule: dict) -> Optional[date]:
+def calculate_next_date_after_today(rule: dict, base_date: Optional[date] = None) -> Optional[date]:
     """
-    Обчислює найближчу дату виконання після сьогодні для повторюваного завдання.
-    Використовується, коли початкова дата в минулому.
+    Обчислює найближчу майбутню дату виконання після сьогодні для повторюваного завдання.
     """
-    today = date.today()
+    today = today_kyiv()
     rule_type = rule.get("rule_type")
 
     if rule_type == "daily":
@@ -148,9 +131,11 @@ def calculate_next_date_after_today(rule: dict) -> Optional[date]:
         interval = rule.get("interval_days")
         if not interval or interval <= 0:
             return None
-        # Знаходимо найближчу дату після сьогодні
-        candidate = today + timedelta(days=1)
-        return candidate
+        if base_date and base_date <= today:
+            days_passed = (today - base_date).days
+            steps = (days_passed // interval) + 1
+            return base_date + timedelta(days=steps * interval)
+        return today + timedelta(days=interval)
 
     if rule_type == "weekly":
         return today + timedelta(weeks=1)
@@ -159,16 +144,12 @@ def calculate_next_date_after_today(rule: dict) -> Optional[date]:
         days_str = rule.get("days_of_week")
         if not days_str:
             return None
-
         try:
             allowed_days = [int(d.strip()) for d in days_str.split(",") if d.strip()]
         except ValueError:
             return None
-
         if not allowed_days:
             return None
-
-        # Шукаємо найближчий дозволений день після сьогодні
         for i in range(1, 8):
             candidate = today + timedelta(days=i)
             if candidate.isoweekday() in allowed_days:
@@ -176,53 +157,41 @@ def calculate_next_date_after_today(rule: dict) -> Optional[date]:
         return None
 
     if rule_type == "monthly":
-        day_of_month = rule.get("day_of_month")
-        if not day_of_month:
-            day_of_month = today.day
-
-        year = today.year
-        month = today.month + 1
+        day_of_month = rule.get("day_of_month") or today.day
+        year, month = today.year, today.month
+        max_day = calendar.monthrange(year, month)[1]
+        candidate = date(year, month, min(day_of_month, max_day))
+        if candidate > today:
+            return candidate
+        month += 1
         if month > 12:
             month = 1
             year += 1
-
         max_day = calendar.monthrange(year, month)[1]
-        actual_day = min(day_of_month, max_day)
-
-        return date(year, month, actual_day)
+        return date(year, month, min(day_of_month, max_day))
 
     if rule_type == "every_n_months":
         interval = rule.get("interval_months")
         if not interval or interval <= 0:
             return None
-        
         day_of_month = today.day
-        
         year = today.year
         month = today.month + interval
-        
         while month > 12:
             month -= 12
             year += 1
-        
         max_day = calendar.monthrange(year, month)[1]
-        actual_day = min(day_of_month, max_day)
-        
-        return date(year, month, actual_day)
+        return date(year, month, min(day_of_month, max_day))
 
     if rule_type == "yearly":
-        interval = rule.get("interval_years")
-        if not interval or interval <= 0:
+        interval = rule.get("interval_years") or 1
+        if interval <= 0:
             return None
-        
         year = today.year + interval
         month = today.month
         day_of_month = today.day
-        
         max_day = calendar.monthrange(year, month)[1]
-        actual_day = min(day_of_month, max_day)
-        
-        return date(year, month, actual_day)
+        return date(year, month, min(day_of_month, max_day))
 
     logger.warning(f"Невідомий тип правила: {rule_type}")
     return None
@@ -246,43 +215,49 @@ async def create_next_instance(task_id: int, user_id: int) -> Optional[int]:
         return None
 
     current_date: Optional[date] = None
-    if task.get("due_date"):
+    raw_due_date = task.get("due_date")
+    raw_due_at = task.get("due_at")
+
+    if isinstance(raw_due_date, date):
+        current_date = raw_due_date
+    elif isinstance(raw_due_date, str):
         try:
-            current_date = date.fromisoformat(task["due_date"])
+            current_date = date.fromisoformat(raw_due_date)
         except ValueError:
             pass
-    elif task.get("due_at"):
-        try:
-            current_date = datetime.fromisoformat(task["due_at"]).date()
-        except ValueError:
-            pass
+
+    if current_date is None and raw_due_at:
+        if isinstance(raw_due_at, datetime):
+            current_date = raw_due_at.date()
+        elif isinstance(raw_due_at, str):
+            try:
+                current_date = datetime.fromisoformat(raw_due_at).date()
+            except ValueError:
+                pass
 
     if not current_date:
-        logger.warning(f"Завдання {task_id} не має дати для обчислення наступної")
-        return None
+        current_date = today_kyiv()
 
-    next_date = calculate_next_date(
-        rule, current_date, rule.get("execution_time")
-    )
-
+    next_date = calculate_next_date(rule, current_date, rule.get("execution_time"))
     if not next_date:
         logger.warning(f"Не вдалося обчислити наступну дату для завдання {task_id}")
         return None
 
+    # Якщо чергова дата все одно в минулому — переносимо на найближчу після сьогодні
+    if next_date < today_kyiv():
+        next_date = calculate_next_date_after_today(rule, base_date=current_date) or next_date
+
     # Перевірка на дублікати
     existing = await task_repository.get_tasks_for_date(user_id, next_date)
     for t in existing:
-        if (
-            t.get("title") == task.get("title")
-            and t.get("recurrence_rule_id") == rule_id
-        ):
-            logger.info(
-                f"Наступний екземпляр вже існує: task_id={t['id']}, date={next_date}"
-            )
+        if t.get("title") == task.get("title") and t.get("recurrence_rule_id") == rule_id:
+            logger.info(f"Наступний екземпляр вже існує: task_id={t['id']}, date={next_date}")
             return t["id"]
 
-    # Створення нового екземпляра
     execution_time = rule.get("execution_time")
+    if not execution_time and isinstance(raw_due_at, datetime):
+        execution_time = raw_due_at.strftime("%H:%M")
+
     due_at = None
     due_date_str = next_date.isoformat()
 
@@ -304,8 +279,5 @@ async def create_next_instance(task_id: int, user_id: int) -> Optional[int]:
         recurrence_rule_id=rule_id,
     )
 
-    logger.info(
-        f"Створено наступний екземпляр: task_id={new_task_id}, "
-        f"date={next_date}, rule_id={rule_id}"
-    )
+    logger.info(f"Створено наступний екземпляр: task_id={new_task_id}, date={next_date}, rule_id={rule_id}")
     return new_task_id

@@ -1,10 +1,12 @@
 """Репозиторій для роботи із завданнями (PostgreSQL)."""
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from app.database.connection import get_connection
+from app.utils.dates import today_kyiv, to_kyiv_naive
 
 logger = logging.getLogger(__name__)
+
 
 async def create_task(
     user_id: int,
@@ -15,27 +17,30 @@ async def create_task(
     due_date: Optional[str] = None,
     recurrence_rule_id: Optional[int] = None,
 ) -> int:
-    due_at_dt = datetime.fromisoformat(due_at) if due_at else None
+    due_at_dt = to_kyiv_naive(datetime.fromisoformat(due_at)) if due_at else None
     due_date_dt = date.fromisoformat(due_date) if due_date else None
-    
+    now = to_kyiv_naive()
+
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO tasks 
             (user_id, title, category, status, priority, due_at, due_date, 
              recurrence_rule_id, created_at, updated_at)
-            VALUES ($1, $2, $3, 'in_progress', $4, $5, $6, $7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES ($1, $2, $3, 'in_progress', $4, $5, $6, $7, $8, $8)
             RETURNING id
             """,
-            user_id, title, category, priority, due_at_dt, due_date_dt, recurrence_rule_id
+            user_id, title, category, priority, due_at_dt, due_date_dt, recurrence_rule_id, now
         )
         logger.info(f"Створено завдання: task_id={row['id']}, user_id={user_id}")
-        return row['id']
+        return row["id"]
+
 
 async def get_task(task_id: int, user_id: int) -> Optional[Dict[str, Any]]:
     async with get_connection() as conn:
         row = await conn.fetchrow("SELECT * FROM tasks WHERE id = $1 AND user_id = $2", task_id, user_id)
         return dict(row) if row else None
+
 
 async def get_tasks_for_date(user_id: int, target_date: date) -> List[Dict[str, Any]]:
     day_start = datetime.combine(target_date, datetime.min.time())
@@ -53,6 +58,7 @@ async def get_tasks_for_date(user_id: int, target_date: date) -> List[Dict[str, 
         )
         return [dict(row) for row in rows]
 
+
 async def get_tasks_for_date_range(user_id: int, date_from: date, date_to: date) -> List[Dict[str, Any]]:
     day_start = datetime.combine(date_from, datetime.min.time())
     day_end = datetime.combine(date_to, datetime.max.time())
@@ -69,8 +75,9 @@ async def get_tasks_for_date_range(user_id: int, date_from: date, date_to: date)
         )
         return [dict(row) for row in rows]
 
+
 async def get_planned_tasks(user_id: int) -> List[Dict[str, Any]]:
-    today = date.today()
+    today = today_kyiv()
     day_start = datetime.combine(today, datetime.min.time())
     async with get_connection() as conn:
         rows = await conn.fetch(
@@ -84,20 +91,21 @@ async def get_planned_tasks(user_id: int) -> List[Dict[str, Any]]:
         )
         return [dict(row) for row in rows]
 
+
 async def get_done_tasks(user_id: int) -> List[Dict[str, Any]]:
-    today = date.today()
-    day_start = datetime.combine(today, datetime.min.time())
+    """Отримати виконані завдання (status = 'completed')."""
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT * FROM tasks 
-            WHERE user_id = $1 AND status = 'in_progress' AND (due_date < $2 OR due_at < $3)
-            ORDER BY COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
-                     CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+            WHERE user_id = $1 AND status = 'completed'
+            ORDER BY COALESCE(completed_at, updated_at) DESC, id DESC
+            LIMIT 50
             """,
-            user_id, today, day_start
+            user_id
         )
         return [dict(row) for row in rows]
+
 
 async def get_recurring_tasks(user_id: int) -> List[Dict[str, Any]]:
     async with get_connection() as conn:
@@ -112,13 +120,15 @@ async def get_recurring_tasks(user_id: int) -> List[Dict[str, Any]]:
         )
         return [dict(row) for row in rows]
 
+
 async def count_active_tasks_by_rule(rule_id: int) -> int:
     async with get_connection() as conn:
         row = await conn.fetchrow(
             "SELECT COUNT(*) as cnt FROM tasks WHERE recurrence_rule_id = $1 AND status = 'in_progress'",
             rule_id
         )
-        return row['cnt'] if row else 0
+        return row["cnt"] if row else 0
+
 
 async def get_tasks_without_due_date(user_id: int) -> List[Dict[str, Any]]:
     async with get_connection() as conn:
@@ -132,43 +142,47 @@ async def get_tasks_without_due_date(user_id: int) -> List[Dict[str, Any]]:
         )
         return [dict(row) for row in rows]
 
+
 async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
     if not kwargs:
         return False
-    
-    allowed_fields = {'title', 'category', 'status', 'priority', 'due_at', 'due_date', 'recurrence_rule_id', 'completed_at', 'notified_at'}
+
+    allowed_fields = {
+        "title", "category", "status", "priority",
+        "due_at", "due_date", "recurrence_rule_id", "completed_at", "notified_at"
+    }
     update_fields = {k: v for k, v in kwargs.items() if k in allowed_fields}
-    
+
     if not update_fields:
         logger.warning(f"⚠️ Спроба оновити недозволені поля: {kwargs.keys()}")
         return False
-    
-    if 'due_date' in update_fields and isinstance(update_fields['due_date'], str):
+
+    if "due_date" in update_fields and isinstance(update_fields["due_date"], str):
         try:
-            update_fields['due_date'] = datetime.strptime(update_fields['due_date'], "%Y-%m-%d").date()
+            update_fields["due_date"] = datetime.strptime(update_fields["due_date"], "%Y-%m-%d").date()
         except ValueError:
             pass
-    if 'due_at' in update_fields and isinstance(update_fields['due_at'], str):
+    if "due_at" in update_fields and isinstance(update_fields["due_at"], str):
         try:
-            update_fields['due_at'] = datetime.fromisoformat(update_fields['due_at'])
+            update_fields["due_at"] = to_kyiv_naive(datetime.fromisoformat(update_fields["due_at"]))
         except ValueError:
             pass
-    if 'completed_at' in update_fields and isinstance(update_fields['completed_at'], str):
+    if "completed_at" in update_fields and isinstance(update_fields["completed_at"], str):
         try:
-            update_fields['completed_at'] = datetime.fromisoformat(update_fields['completed_at'])
+            update_fields["completed_at"] = to_kyiv_naive(datetime.fromisoformat(update_fields["completed_at"]))
         except ValueError:
             pass
 
-    # ВИПРАВЛЕНО: параметри починаються з $1
+    now = to_kyiv_naive()
     set_clause = ", ".join(f"{k} = ${i+1}" for i, k in enumerate(update_fields.keys()))
-    values = list(update_fields.values()) + [task_id, user_id]
-    
+    values = list(update_fields.values()) + [now, task_id, user_id]
+
     query = f"""
         UPDATE tasks 
-        SET {set_clause}, updated_at = CURRENT_TIMESTAMP 
+        SET {set_clause}, updated_at = ${len(values)-2}
         WHERE id = ${len(values)-1} AND user_id = ${len(values)}
     """
-    
+
     async with get_connection() as conn:
         try:
             status = await conn.execute(query, *values)
@@ -177,6 +191,7 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
         except Exception as e:
             logger.error(f"❌ SQL ПОМИЛКА UPDATE: {e} | Query: {query} | Values: {values}", exc_info=True)
             return False
+
 
 async def search_tasks(user_id: int, query: str, limit: int = 20) -> List[Dict[str, Any]]:
     search_pattern = f"%{query}%"
@@ -193,9 +208,10 @@ async def search_tasks(user_id: int, query: str, limit: int = 20) -> List[Dict[s
         )
         return [dict(row) for row in rows]
 
+
 async def get_filtered_tasks(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
     query = "SELECT * FROM tasks WHERE user_id = $1 AND status = 'in_progress'"
-    params = [user_id]
+    params: list[Any] = [user_id]
     param_idx = 2
     if category:
         query += f" AND category = ${param_idx}"
@@ -213,6 +229,7 @@ async def get_filtered_tasks(user_id: int, category: Optional[str] = None, prior
         rows = await conn.fetch(query, *params)
         return [dict(row) for row in rows]
 
+
 async def get_tasks_for_date_filtered(user_id: int, target_date: date, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
     day_start = datetime.combine(target_date, datetime.min.time())
     day_end = datetime.combine(target_date, datetime.max.time())
@@ -220,7 +237,7 @@ async def get_tasks_for_date_filtered(user_id: int, target_date: date, category:
         SELECT * FROM tasks 
         WHERE user_id = $1 AND status = 'in_progress' AND (due_date = $2 OR (due_at >= $3 AND due_at <= $4))
     """
-    params = [user_id, target_date, day_start, day_end]
+    params: list[Any] = [user_id, target_date, day_start, day_end]
     param_idx = 5
     if category:
         query += f" AND category = ${param_idx}"
@@ -238,6 +255,7 @@ async def get_tasks_for_date_filtered(user_id: int, target_date: date, category:
         rows = await conn.fetch(query, *params)
         return [dict(row) for row in rows]
 
+
 async def get_tasks_for_date_range_filtered(user_id: int, date_from: date, date_to: date, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
     day_start = datetime.combine(date_from, datetime.min.time())
     day_end = datetime.combine(date_to, datetime.max.time())
@@ -245,7 +263,7 @@ async def get_tasks_for_date_range_filtered(user_id: int, date_from: date, date_
         SELECT * FROM tasks 
         WHERE user_id = $1 AND status = 'in_progress' AND ((due_date >= $2 AND due_date <= $3) OR (due_at >= $4 AND due_at <= $5))
     """
-    params = [user_id, date_from, date_to, day_start, day_end]
+    params: list[Any] = [user_id, date_from, date_to, day_start, day_end]
     param_idx = 6
     if category:
         query += f" AND category = ${param_idx}"
@@ -263,14 +281,15 @@ async def get_tasks_for_date_range_filtered(user_id: int, date_from: date, date_
         rows = await conn.fetch(query, *params)
         return [dict(row) for row in rows]
 
+
 async def get_planned_tasks_filtered(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
-    today = date.today()
+    today = today_kyiv()
     day_start = datetime.combine(today, datetime.min.time())
     query = """
         SELECT * FROM tasks 
         WHERE user_id = $1 AND status = 'in_progress' AND (due_date >= $2 OR due_at >= $3)
     """
-    params = [user_id, today, day_start]
+    params: list[Any] = [user_id, today, day_start]
     param_idx = 4
     if category:
         query += f" AND category = ${param_idx}"
@@ -288,15 +307,12 @@ async def get_planned_tasks_filtered(user_id: int, category: Optional[str] = Non
         rows = await conn.fetch(query, *params)
         return [dict(row) for row in rows]
 
+
 async def get_done_tasks_filtered(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
-    today = date.today()
-    day_start = datetime.combine(today, datetime.min.time())
-    query = """
-        SELECT * FROM tasks 
-        WHERE user_id = $1 AND status = 'in_progress' AND (due_date < $2 OR due_at < $3)
-    """
-    params = [user_id, today, day_start]
-    param_idx = 4
+    """Отримати виконані завдання (status = 'completed') з фільтрацією."""
+    query = "SELECT * FROM tasks WHERE user_id = $1 AND status = 'completed'"
+    params: list[Any] = [user_id]
+    param_idx = 2
     if category:
         query += f" AND category = ${param_idx}"
         params.append(category)
@@ -306,16 +322,17 @@ async def get_done_tasks_filtered(user_id: int, category: Optional[str] = None, 
         params.append(priority)
         param_idx += 1
     query += """
-        ORDER BY COALESCE(due_at, CAST(due_date AS timestamp)) ASC,
-                 CASE priority WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END
+        ORDER BY COALESCE(completed_at, updated_at) DESC, id DESC
+        LIMIT 50
     """
     async with get_connection() as conn:
         rows = await conn.fetch(query, *params)
         return [dict(row) for row in rows]
+
 
 async def get_recurring_tasks_filtered(user_id: int, category: Optional[str] = None, priority: Optional[str] = None) -> List[Dict[str, Any]]:
     query = "SELECT * FROM tasks WHERE user_id = $1 AND status = 'in_progress' AND recurrence_rule_id IS NOT NULL"
-    params = [user_id]
+    params: list[Any] = [user_id]
     param_idx = 2
     if category:
         query += f" AND category = ${param_idx}"
@@ -333,38 +350,61 @@ async def get_recurring_tasks_filtered(user_id: int, category: Optional[str] = N
         rows = await conn.fetch(query, *params)
         return [dict(row) for row in rows]
 
+
 async def delete_task(task_id: int, user_id: int) -> bool:
     async with get_connection() as conn:
         status = await conn.execute("DELETE FROM tasks WHERE id = $1 AND user_id = $2", task_id, user_id)
         return "DELETE 1" in status
 
+
 # =============================================================================
-# НОВІ ФУНКЦІЇ ДЛЯ НАГАДУВАНЬ
+# ФУНКЦІЇ ДЛЯ НАГАДУВАНЬ (з урахуванням часового поясу Europe/Kyiv)
 # =============================================================================
 
 async def get_upcoming_reminders() -> List[Dict[str, Any]]:
-    """Отримати завдання, про які треба нагадати за 60 хвилин (і які ще не були відправлені)."""
+    """Отримати завдання, про які треба нагадати за 60 хвилин (ще не відправлені)."""
+    now = to_kyiv_naive()
+    window_end = now + timedelta(minutes=60)
     query = """
-        SELECT t.id, t.title, t.due_at, u.telegram_id
+        SELECT t.id, t.title, t.due_at, t.user_id, u.telegram_id
         FROM tasks t
         JOIN users u ON t.user_id = u.id
         WHERE t.status = 'in_progress'
+          AND u.is_active = 1
           AND t.due_at IS NOT NULL
-          AND t.due_at >= CURRENT_TIMESTAMP
-          AND t.due_at <= CURRENT_TIMESTAMP + INTERVAL '60 minutes'
+          AND t.due_at >= $1
+          AND t.due_at <= $2
           AND (t.notified_at IS NULL OR t.notified_at < t.due_at - INTERVAL '60 minutes')
     """
     async with get_connection() as conn:
-        rows = await conn.fetch(query)
+        rows = await conn.fetch(query, now, window_end)
         return [dict(row) for row in rows]
+
 
 async def mark_task_notified(task_id: int) -> bool:
     """Позначити завдання як таке, про яке вже нагадали."""
+    now = to_kyiv_naive()
     query = """
         UPDATE tasks 
-        SET notified_at = CURRENT_TIMESTAMP 
-        WHERE id = $1
+        SET notified_at = $1 
+        WHERE id = $2
     """
     async with get_connection() as conn:
-        status = await conn.execute(query, task_id)
+        status = await conn.execute(query, now, task_id)
         return "UPDATE 1" in status
+
+
+class TaskRepository:
+    """ООП-обгортка над функціями репозиторію для сумісності зі SchedulerService."""
+
+    async def get_tasks_by_date(self, user_id: int, target_date: date) -> List[Dict[str, Any]]:
+        return await get_tasks_for_date(user_id, target_date)
+
+    async def get_tasks_without_due_date(self, user_id: int) -> List[Dict[str, Any]]:
+        return await get_tasks_without_due_date(user_id)
+
+    async def get_upcoming_reminders(self) -> List[Dict[str, Any]]:
+        return await get_upcoming_reminders()
+
+    async def mark_as_reminded(self, task_id: int) -> bool:
+        return await mark_task_notified(task_id)

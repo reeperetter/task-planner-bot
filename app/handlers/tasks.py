@@ -15,6 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from app.repositories import user_repository, task_repository
 from app.services import task_service
 from app.services.parser_service import parse_natural_language
+from app.utils.dates import format_task_line as _format_task_line, today_kyiv
 from app.utils.keyboard import get_main_menu_keyboard
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ HELP_TEXT = (
     "• <b>📆 На завтра</b> — завдання на завтра\n"
     "• <b>📊 Наступні 7 днів</b> — завдання на найближчий тиждень\n"
     "• <b>📋 Заплановані</b> — усі завдання з датою сьогодні або в майбутньому\n"
-    "• <b>✅ Виконані</b> — завдання, строк яких уже минув\n"
+    "• <b>✅ Виконані</b> — завершені завдання\n"
     "• <b>🔄 Повторювані</b> — усі активні повторювані завдання\n\n"
     "За замовчуванням завдання відображаються компактно. Натисніть «✏️ Редагувати список», щоб побачити кнопки редагування та видалення під кожним завданням.\n\n"
     "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -186,49 +187,6 @@ def _normalize_date(value: str | None) -> str | None:
         except (ValueError, TypeError):
             continue
     return None
-
-
-def _format_due(task: dict) -> str:
-    raw_at = task.get("due_at")
-    raw_date = task.get("due_date")
-
-    if raw_at:
-        try:
-            if isinstance(raw_at, str):
-                dt = datetime.fromisoformat(raw_at)
-            else:
-                dt = raw_at
-            return dt.strftime('%d.%m.%Y о %H:%M')
-        except (ValueError, TypeError, AttributeError):
-            return str(raw_at)
-
-    if raw_date:
-        try:
-            if isinstance(raw_date, str):
-                d = datetime.strptime(raw_date, "%Y-%m-%d").date()
-            else:
-                d = raw_date
-            return d.strftime('%d.%m.%Y')
-        except (ValueError, TypeError, AttributeError):
-            return str(raw_date)
-
-    return "без строку"
-
-
-def _format_task_line(task: dict, index: int = 0) -> str:
-    """Форматування одного завдання для списку з нумерацією."""
-    priority = PRIORITY_EMOJI.get(task.get("priority", "normal"), "🟡")
-    category = "💼" if task.get("category") == "work" else "👤"
-    title = _escape(task.get("title") or "Без назви")
-    due = _format_due(task)
-    
-    recurrence_mark = " 🔁" if task.get("recurrence_rule_id") else ""
-    date_and_meta = f"{due} {priority} {category}{recurrence_mark}"
-    
-    if index > 0:
-        return f"{index}. <b>{title}</b>\n   {date_and_meta}"
-    else:
-        return f"<b>{title}</b>\n   {date_and_meta}"
 
 
 async def _send_tasks_list_compact(
@@ -560,7 +518,7 @@ async def show_planned(message: types.Message, state: FSMContext) -> None:
 @router.message(F.text == "✅ Виконані")
 async def show_done(message: types.Message, state: FSMContext) -> None:
     await state.clear()
-    await _show_task_list(message, state, "✅ Виконані завдання (строк минув)", task_service.get_done_tasks)
+    await _show_task_list(message, state, "✅ Виконані завдання", task_service.get_done_tasks)
 
 
 @router.message(Command("recurring"))
@@ -626,9 +584,9 @@ async def save_task(callback: types.CallbackQuery, state: FSMContext) -> None:
     if recurrence and due_date:
         try:
             due_date_obj = datetime.strptime(due_date, "%Y-%m-%d").date()
-            today = date.today()
+            today = today_kyiv()
             if due_date_obj < today:
-                next_date = recurrence_service.calculate_next_date_after_today(recurrence)
+                next_date = recurrence_service.calculate_next_date_after_today(recurrence, base_date=due_date_obj)
                 if next_date:
                     due_date = next_date.isoformat()
                     due_at = None
@@ -1257,7 +1215,7 @@ async def handle_natural_language_task(message: types.Message, state: FSMContext
 
     if not due_date and not due_at:
         if recurrence:
-            today = date.today().isoformat()
+            today = today_kyiv().isoformat()
             logger.info(f"🔁 Для повторюваного завдання встановлено базову дату: {today}")
             await state.update_data(due_date=today)
             await _send_preview(message, state)
