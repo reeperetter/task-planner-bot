@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -16,11 +18,35 @@ from app.handlers.start import router as start_router
 from app.handlers.tasks import router as tasks_router
 
 
+async def _health_handler(request: web.Request) -> web.Response:
+    return web.json_response({"status": "ok", "service": "task-planner-bot"})
+
+
+async def _start_health_server() -> web.AppRunner | None:
+    port_raw = os.getenv("PORT")
+    if not port_raw:
+        return None
+    port = int(port_raw)
+    web_app = web.Application()
+    web_app.router.add_get("/", _health_handler)
+    web_app.router.add_get("/health", _health_handler)
+
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    await site.start()
+    logging.info(f"HTTP healthcheck-сервер запущено на 0.0.0.0:{port}")
+    return runner
+
+
 async def main() -> None:
     logging.basicConfig(
         level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     )
+
+    # Піднімаємо HTTP-порт якомога раніше, щоб Render Web Service зафіксував відкритий порт
+    health_runner = await _start_health_server()
 
     logging.info("Запуск міграцій бази даних...")
     await run_migrations()
@@ -50,6 +76,8 @@ async def main() -> None:
         scheduler_service.shutdown()
         await bot.session.close()
         await close_db()
+        if health_runner is not None:
+            await health_runner.cleanup()
 
 
 if __name__ == "__main__":

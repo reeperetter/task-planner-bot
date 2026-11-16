@@ -1,12 +1,13 @@
 [project]
 name = "task-planner-bot"
-version = "0.8.0"
+version = "0.8.1"
 description = "Telegram-бот «Особистий планувальник»"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "aiogram>=3.13.0",
     "aiosqlite>=0.20.0",
+    "apscheduler>=3.10.4",
     "asyncpg>=0.32.0",
     "dateparser>=1.2.0",
     "python-dotenv>=1.0.1",

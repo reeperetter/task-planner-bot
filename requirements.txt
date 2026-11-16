@@ -14,6 +14,10 @@ aiosqlite==0.22.1
     # via task-planner-bot (pyproject.toml)
 annotated-types==0.8.0
     # via pydantic
+apscheduler==3.11.0
+    # via task-planner-bot (pyproject.toml)
+tzdata==2025.2
+    # via apscheduler
 asyncpg==0.32.0
     # via task-planner-bot (pyproject.toml)
 attrs==26.1.0
