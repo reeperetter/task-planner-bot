@@ -77,3 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority);
 CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_rule_id ON tasks(recurrence_rule_id);
 CREATE INDEX IF NOT EXISTS idx_report_log_user_date ON report_log(user_id, report_date);
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notified_at TIMESTAMP;
+
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS morning_report_enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS reminder_minutes_before INTEGER NOT NULL DEFAULT 60;
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS reminder_enabled INTEGER NOT NULL DEFAULT 1;

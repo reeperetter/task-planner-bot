@@ -15,7 +15,10 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS user_settings (
     user_id INTEGER PRIMARY KEY,
     timezone TEXT NOT NULL DEFAULT 'Europe/Kyiv',
-    morning_report_time TEXT NOT NULL DEFAULT '07:00',
+    morning_report_time TEXT NOT NULL DEFAULT '08:00',
+    morning_report_enabled INTEGER NOT NULL DEFAULT 1,
+    reminder_minutes_before INTEGER NOT NULL DEFAULT 60,
+    reminder_enabled INTEGER NOT NULL DEFAULT 1,
     sort_order TEXT NOT NULL DEFAULT 'priority_desc,due_at_asc',
     date_format TEXT NOT NULL DEFAULT '%d.%m.%Y',
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

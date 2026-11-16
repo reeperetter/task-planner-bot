@@ -39,12 +39,16 @@ async def get_user_id_by_telegram_id(telegram_id: int) -> Optional[int]:
 
 
 async def get_all_active_users() -> List[Dict[str, Any]]:
-    """Отримати всіх активних користувачів разом із налаштуваннями."""
+    """Отримати всіх активних користувачів разом із індивідуальними налаштуваннями сповіщень."""
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
-            SELECT u.*, COALESCE(s.timezone, 'Europe/Kyiv') AS timezone,
-                   COALESCE(s.morning_report_time, '08:00') AS morning_report_time
+            SELECT u.*,
+                   COALESCE(s.timezone, 'Europe/Kyiv') AS timezone,
+                   COALESCE(s.morning_report_time, '08:00') AS morning_report_time,
+                   COALESCE(s.morning_report_enabled, 1) AS morning_report_enabled,
+                   COALESCE(s.reminder_minutes_before, 60) AS reminder_minutes_before,
+                   COALESCE(s.reminder_enabled, 1) AS reminder_enabled
             FROM users u
             LEFT JOIN user_settings s ON s.user_id = u.id
             WHERE u.is_active = 1

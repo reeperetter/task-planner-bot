@@ -167,6 +167,8 @@ async def update_task(task_id: int, user_id: int, **kwargs) -> bool:
             update_fields["due_at"] = to_kyiv_naive(datetime.fromisoformat(update_fields["due_at"]))
         except ValueError:
             pass
+    if ("due_at" in update_fields or "due_date" in update_fields) and "notified_at" not in update_fields:
+        update_fields["notified_at"] = None
     if "completed_at" in update_fields and isinstance(update_fields["completed_at"], str):
         try:
             update_fields["completed_at"] = to_kyiv_naive(datetime.fromisoformat(update_fields["completed_at"]))
@@ -358,26 +360,36 @@ async def delete_task(task_id: int, user_id: int) -> bool:
 
 
 # =============================================================================
-# ФУНКЦІЇ ДЛЯ НАГАДУВАНЬ (з урахуванням часового поясу Europe/Kyiv)
+# ФУНКЦІЇ ДЛЯ НАГАДУВАНЬ ТА РАНКОВИХ ЗВІТІВ (з урахуванням налаштувань користувача)
 # =============================================================================
 
 async def get_upcoming_reminders() -> List[Dict[str, Any]]:
-    """Отримати завдання, про які треба нагадати за 60 хвилин (ще не відправлені)."""
+    """
+    Отримати завдання, про які треба нагадати згідно з індивідуальним налаштуванням
+    користувача `reminder_minutes_before` (стандартно 60 хв).
+    """
     now = to_kyiv_naive()
-    window_end = now + timedelta(minutes=60)
     query = """
-        SELECT t.id, t.title, t.due_at, t.user_id, u.telegram_id
+        SELECT t.id, t.title, t.due_at, t.priority, t.category, t.user_id,
+               u.telegram_id,
+               COALESCE(s.reminder_minutes_before, 60) AS reminder_minutes_before
         FROM tasks t
         JOIN users u ON t.user_id = u.id
+        LEFT JOIN user_settings s ON s.user_id = u.id
         WHERE t.status = 'in_progress'
           AND u.is_active = 1
+          AND COALESCE(s.reminder_enabled, 1) = 1
+          AND COALESCE(s.reminder_minutes_before, 60) > 0
           AND t.due_at IS NOT NULL
           AND t.due_at >= $1
-          AND t.due_at <= $2
-          AND (t.notified_at IS NULL OR t.notified_at < t.due_at - INTERVAL '60 minutes')
+          AND t.due_at <= $1 + (COALESCE(s.reminder_minutes_before, 60) * INTERVAL '1 minute')
+          AND (
+              t.notified_at IS NULL
+              OR t.notified_at < t.due_at - (COALESCE(s.reminder_minutes_before, 60) * INTERVAL '1 minute')
+          )
     """
     async with get_connection() as conn:
-        rows = await conn.fetch(query, now, window_end)
+        rows = await conn.fetch(query, now)
         return [dict(row) for row in rows]
 
 
@@ -394,6 +406,42 @@ async def mark_task_notified(task_id: int) -> bool:
         return "UPDATE 1" in status
 
 
+async def was_morning_report_sent(user_id: int, report_date: date) -> bool:
+    """Перевірити, чи вже надсилався ранковий дайджест користувачу за вказану дату."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT 1 FROM report_log
+            WHERE user_id = $1 AND report_date = $2 AND status = 'success'
+            """,
+            user_id, report_date
+        )
+        return row is not None
+
+
+async def log_morning_report(
+    user_id: int,
+    report_date: date,
+    status: str = "success",
+    error_message: Optional[str] = None,
+) -> None:
+    """Зафіксувати результат відправки ранкового дайджесту в report_log (ідемпотентно)."""
+    now = to_kyiv_naive()
+    success_time = now if status == "success" else None
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO report_log (user_id, report_date, attempt_time, status, success_time, error_message)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (user_id, report_date, status)
+            DO UPDATE SET attempt_time = EXCLUDED.attempt_time,
+                          success_time = COALESCE(EXCLUDED.success_time, report_log.success_time),
+                          error_message = EXCLUDED.error_message
+            """,
+            user_id, report_date, now, status, success_time, error_message
+        )
+
+
 class TaskRepository:
     """ООП-обгортка над функціями репозиторію для сумісності зі SchedulerService."""
 
@@ -408,3 +456,15 @@ class TaskRepository:
 
     async def mark_as_reminded(self, task_id: int) -> bool:
         return await mark_task_notified(task_id)
+
+    async def was_morning_report_sent(self, user_id: int, report_date: date) -> bool:
+        return await was_morning_report_sent(user_id, report_date)
+
+    async def log_morning_report(
+        self,
+        user_id: int,
+        report_date: date,
+        status: str = "success",
+        error_message: Optional[str] = None,
+    ) -> None:
+        await log_morning_report(user_id, report_date, status, error_message)

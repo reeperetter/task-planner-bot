@@ -15,6 +15,7 @@ from app.repositories.user_repository import UserRepository
 from app.services.scheduler_service import SchedulerService
 
 from app.handlers.start import router as start_router
+from app.handlers.settings import router as settings_router
 from app.handlers.tasks import router as tasks_router
 
 
@@ -58,6 +59,7 @@ async def main() -> None:
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(start_router)
+    dp.include_router(settings_router)
     dp.include_router(tasks_router)
 
     task_repo = TaskRepository()
